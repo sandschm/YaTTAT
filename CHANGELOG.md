@@ -1,5 +1,9 @@
 # Änderungen
 
+## Unveröffentlicht
+
+- App-Icon in den Farben des YaTTT-Icons (Cyan und Gelb).
+
 ## 0.3.0 – 2026-10-31
 
 Vier Sicherungen gegen stille Lücken in den Zeiten:
