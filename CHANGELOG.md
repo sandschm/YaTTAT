@@ -1,5 +1,23 @@
 # Änderungen
 
+## 0.3.0 – 2026-10-31
+
+Vier Sicherungen gegen stille Lücken in den Zeiten:
+
+- **Quellen-Abgleich** (Einstellungen → Verbindung): liest den angezeigten Zeitraum aus Jira und
+  Tempo und stellt beide je Mitglied und Tag gegenüber, inklusive der Worklogs, die Jira anderen
+  Autoren zuordnet, und der Tempo-Worklogs auf nicht lesbaren Tickets. Der Cache bleibt unverändert.
+- **Stand** in der Kopfzeile zeigt jetzt den ältesten Abruf im Zeitraum statt des jüngsten. Ist er
+  älter als das doppelte Aktualisierungsintervall (mindestens eine Stunde), wird das als Warnung mit
+  „Aktualisieren empfohlen“ angezeigt; ein Klick lädt neu. Die automatische Aktualisierung richtet
+  sich ebenfalls nach dem Alter der geladenen Tage, sodass ein Zeitraum nach dem App-Start
+  nachgeladen wird, wenn er älter als das Intervall ist.
+- Wird der Zeitraum oder das Team gewechselt, während ein Abruf läuft, holt die App die neue
+  Ansicht nach dem laufenden Abruf automatisch nach (vorher blieb die Lücke bis zum nächsten Wechsel).
+- Mitglieder ohne Zeiten werden nach jedem Abruf namentlich genannt: bei der Jira-Quelle zusammen
+  mit den fremden Autoren, bei der Tempo-Quelle als Hinweis auf fehlende Buchungen oder fehlende
+  Token-Berechtigung.
+
 ## 0.2.0 – 2026-10-31
 
 - **Tempo Cloud als Quelle der Zeiten** (Einstellungen → Verbindung → Quelle der Zeiten). Bucht das

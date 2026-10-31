@@ -18,7 +18,7 @@ use crate::tempo::TempoCloud;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const PARALLEL_REQUESTS: usize = 4;
 const MAX_ISSUES: usize = 5000;
@@ -65,9 +65,10 @@ pub struct FetchOutcome {
     pub from: NaiveDate,
     pub to: NaiveDate,
     pub authors: usize,
-    /// Requested authors that have at least one worklog in the fetched range.
+    /// Requested authors without any worklog in the fetched range (permission problem, wrong
+    /// source or simply no bookings).
     #[serde(default)]
-    pub authors_with_worklogs: usize,
+    pub authors_without_worklogs: Vec<String>,
     pub issues: usize,
     pub worklogs: usize,
     pub removed: usize,
@@ -86,7 +87,7 @@ impl FetchOutcome {
             from: req.from,
             to: req.to,
             authors: 0,
-            authors_with_worklogs: 0,
+            authors_without_worklogs: vec![],
             issues: 0,
             worklogs: 0,
             removed: 0,
@@ -371,18 +372,148 @@ pub async fn fetch_range(
         .iter()
         .map(|w| w.author_id.as_str())
         .collect();
+    let authors_without_worklogs: Vec<String> = authors
+        .iter()
+        .filter(|a| !with_worklogs.contains(a.as_str()))
+        .cloned()
+        .collect();
     Ok(FetchOutcome {
         fetched: true,
         source: source.into(),
         from,
         to,
         authors: authors.len(),
-        authors_with_worklogs: with_worklogs.len(),
+        authors_without_worklogs,
         issues: collected.issues,
         worklogs: collected.worklogs.len(),
         removed,
         other_authors: collected.other_authors,
         unresolved_issues: collected.unresolved_issues,
+    })
+}
+
+// ------------------------------------------------------------------ comparison
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DayDiff {
+    pub date: NaiveDate,
+    pub jira_seconds: i64,
+    pub tempo_seconds: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemberComparison {
+    pub id: String,
+    pub jira_seconds: i64,
+    pub tempo_seconds: i64,
+    pub jira_worklogs: usize,
+    pub tempo_worklogs: usize,
+    /// Days where the two sources disagree (at most [`MAX_DIFF_DAYS`]).
+    pub differing_days: Vec<DayDiff>,
+}
+
+/// Result of reading the same range from Jira and Tempo. The cache is not changed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceComparison {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    pub jira_seconds: i64,
+    pub tempo_seconds: i64,
+    pub jira_issues: usize,
+    pub tempo_issues: usize,
+    pub members: Vec<MemberComparison>,
+    pub jira_other_authors: Vec<AuthorCount>,
+    pub tempo_unresolved_issues: usize,
+}
+
+const MAX_DIFF_DAYS: usize = 62;
+
+type Sums<'a> = HashMap<&'a str, (i64, usize, BTreeMap<NaiveDate, i64>)>;
+
+fn sums(worklogs: &[Worklog]) -> Sums<'_> {
+    let mut out: Sums<'_> = HashMap::new();
+    for w in worklogs {
+        let e = out
+            .entry(w.author_id.as_str())
+            .or_insert_with(|| (0, 0, BTreeMap::new()));
+        e.0 += w.seconds;
+        e.1 += 1;
+        *e.2.entry(w.date).or_insert(0) += w.seconds;
+    }
+    out
+}
+
+/// Reads the whole range from both sources (ignoring the cache's coverage) and compares them per
+/// member and day. Issues seen on the way are remembered, worklogs are not written.
+pub async fn compare_sources(
+    jira: &JiraClient,
+    tempo: &TempoCloud,
+    store: &Store,
+    req: &FetchRequest,
+    now: DateTime<Utc>,
+    progress: &(dyn Fn(&str, FetchProgress) + Sync),
+) -> Result<SourceComparison> {
+    let scope = Scope {
+        from: req.from,
+        to: req.to,
+        authors: &req.author_ids,
+        project_keys: &req.project_keys,
+        now,
+    };
+    let j = collect_from_jira(jira, store, &scope, &|p| progress("jira", p)).await?;
+    let t = collect_from_tempo(jira, tempo, store, &scope, &|p| progress("tempo", p)).await?;
+    let js = sums(&j.worklogs);
+    let ts = sums(&t.worklogs);
+    let empty = (0, 0, BTreeMap::new());
+    let members = req
+        .author_ids
+        .iter()
+        .map(|id| {
+            let a = js.get(id.as_str()).unwrap_or(&empty);
+            let b = ts.get(id.as_str()).unwrap_or(&empty);
+            let days: BTreeMap<NaiveDate, (i64, i64)> =
+                a.2.iter()
+                    .map(|(d, s)| (*d, (*s, 0)))
+                    .chain(b.2.iter().map(|(d, s)| (*d, (0, *s))))
+                    .fold(BTreeMap::new(), |mut acc, (d, (x, y))| {
+                        let e = acc.entry(d).or_insert((0, 0));
+                        e.0 += x;
+                        e.1 += y;
+                        acc
+                    });
+            let mut differing_days: Vec<DayDiff> = days
+                .into_iter()
+                .filter(|(_, (x, y))| x != y)
+                .map(|(date, (jira_seconds, tempo_seconds))| DayDiff {
+                    date,
+                    jira_seconds,
+                    tempo_seconds,
+                })
+                .collect();
+            differing_days.truncate(MAX_DIFF_DAYS);
+            MemberComparison {
+                id: id.clone(),
+                jira_seconds: a.0,
+                tempo_seconds: b.0,
+                jira_worklogs: a.1,
+                tempo_worklogs: b.1,
+                differing_days,
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok(SourceComparison {
+        from: req.from,
+        to: req.to,
+        jira_seconds: members.iter().map(|m| m.jira_seconds).sum(),
+        tempo_seconds: members.iter().map(|m| m.tempo_seconds).sum(),
+        jira_issues: j.issues,
+        tempo_issues: t.issues,
+        members,
+        jira_other_authors: j.other_authors,
+        tempo_unresolved_issues: t.unresolved_issues,
     })
 }
 
@@ -494,7 +625,7 @@ mod tests {
         assert_eq!(out.worklogs, 3);
         assert_eq!(out.removed, 0);
         assert_eq!(out.authors, 2);
-        assert_eq!(out.authors_with_worklogs, 2);
+        assert!(out.authors_without_worklogs.is_empty());
         assert_eq!(
             out.other_authors,
             vec![AuthorCount {
@@ -639,7 +770,7 @@ mod tests {
         assert!(out.fetched);
         assert_eq!(out.source, "tempoCloud");
         assert_eq!(out.authors, 2);
-        assert_eq!(out.authors_with_worklogs, 2);
+        assert!(out.authors_without_worklogs.is_empty());
         assert_eq!(out.issues, 2);
         assert_eq!(out.worklogs, 2);
         assert_eq!(out.unresolved_issues, 1);
@@ -657,6 +788,92 @@ mod tests {
             .coverage(&req.author_ids, req.from, req.to)
             .unwrap()
             .complete());
+    }
+
+    #[tokio::test]
+    async fn comparison_reports_differences_per_member_and_day() {
+        let jira_server = MockServer::start().await;
+        let tempo_server = MockServer::start().await;
+        // Jira: alice has 1 h on A-1 on 10-01 and 10-02; bob nothing; the Tempo app logged for bob.
+        mock_jira(
+            &jira_server,
+            json!({"total": 3, "startAt": 0, "maxResults": 1000, "worklogs": [
+                {"id": "10", "author": {"name": "alice"}, "started": "2026-10-01T09:00:00.000+0200", "timeSpentSeconds": 3600},
+                {"id": "11", "author": {"name": "alice"}, "started": "2026-10-02T09:00:00.000+0200", "timeSpentSeconds": 3600},
+                {"id": "13", "author": {"name": "app", "displayName": "Tempo Timesheets"}, "started": "2026-10-02T09:00:00.000+0200", "timeSpentSeconds": 7200}
+            ]}),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "1", "key": "A-1", "fields": {"summary": "One", "project": {"key": "A"}, "issuetype": {"name": "Task"}, "status": {"name": "Open", "statusCategory": {"key": "new"}}}})))
+            .mount(&jira_server)
+            .await;
+        let tlog = |id: i64, author: &str, date: &str, secs: i64| json!({"tempoWorklogId": id, "issue": {"id": 1}, "timeSpentSeconds": secs, "startDate": date, "author": {"accountId": author}});
+        Mock::given(method("GET"))
+            .and(path("/worklogs/user/alice"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results": [
+                tlog(1, "alice", "2026-10-01", 3600),
+                tlog(2, "alice", "2026-10-02", 1800) // Jira says 1 h
+            ]})))
+            .mount(&tempo_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/worklogs/user/bob"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results": [
+                tlog(3, "bob", "2026-10-02", 7200)
+            ]})))
+            .mount(&tempo_server)
+            .await;
+        let jira = JiraClient::new(
+            &jira_server.uri(),
+            Credential::Bearer { token: "t".into() },
+            Deployment::DataCenter,
+        )
+        .unwrap();
+        let tempo = TempoCloud::new(&tempo_server.uri(), "tok").unwrap();
+        let store = Store::open_in_memory().unwrap();
+        let req = FetchRequest {
+            from: day("2026-10-01"),
+            to: day("2026-10-05"),
+            author_ids: vec!["alice".into(), "bob".into()],
+            project_keys: vec![],
+            force: true,
+        };
+        let seen = Mutex::new(Vec::<String>::new());
+        let progress = |source: &str, p: FetchProgress| {
+            seen.lock().unwrap().push(format!("{source}:{}", p.phase))
+        };
+        let cmp = compare_sources(&jira, &tempo, &store, &req, Utc::now(), &progress)
+            .await
+            .unwrap();
+        assert_eq!(cmp.jira_seconds, 7200 + 600); // alice 2 h + bob's Jira worklog on A-2 (10 min)
+        assert_eq!(cmp.tempo_seconds, 3600 + 1800 + 7200);
+        assert_eq!(cmp.members[0].id, "alice");
+        assert_eq!(cmp.members[0].jira_worklogs, 2);
+        assert_eq!(cmp.members[0].tempo_worklogs, 2);
+        assert_eq!(
+            cmp.members[0].differing_days,
+            vec![DayDiff {
+                date: day("2026-10-02"),
+                jira_seconds: 3600,
+                tempo_seconds: 1800
+            }]
+        );
+        assert_eq!(cmp.members[1].jira_seconds, 600);
+        assert_eq!(cmp.members[1].tempo_seconds, 7200);
+        assert_eq!(cmp.members[1].differing_days.len(), 1);
+        assert_eq!(cmp.jira_other_authors[0].name, "Tempo Timesheets");
+        assert_eq!(cmp.tempo_unresolved_issues, 0);
+        // the cache holds the issues but no worklogs
+        assert!(store.get_issue("A-1").unwrap().is_some());
+        assert!(store
+            .list_worklogs(day("2026-10-01"), day("2026-10-05"), &req.author_ids)
+            .unwrap()
+            .is_empty());
+        let seen = seen.lock().unwrap();
+        assert!(seen.iter().any(|s| s == "jira:worklogs"));
+        assert!(seen.iter().any(|s| s == "tempo:issues"));
     }
 
     #[tokio::test]

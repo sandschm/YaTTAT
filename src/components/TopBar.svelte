@@ -2,7 +2,7 @@
   // Team selector, date range and fetch status. Shared by all analysis views.
   import { presets, store, type Preset } from "../lib/store.svelte";
   import { api, type CoverageInfo } from "../lib/api";
-  import { formatDate, relativeTime } from "../lib/format";
+  import { formatDate, formatDateTime, relativeTime } from "../lib/format";
   import Icon from "./Icon.svelte";
 
   let coverage = $state<CoverageInfo | null>(null);
@@ -25,11 +25,24 @@
   // Jira found worklogs of people who are not members (typically the Tempo app) but none or few
   // for the members themselves: the times are probably only reachable through Tempo.
   const outcome = $derived(store.fetchStatus.lastOutcome);
+  const missingNames = $derived((outcome?.fetched ? outcome.authorsWithoutWorklogs : []).map((id) => store.memberName(id)));
   const otherAuthorsHint = $derived.by(() => {
-    if (!outcome || !outcome.fetched || outcome.source !== "jira" || !outcome.otherAuthors.length) return "";
-    if (outcome.authorsWithWorklogs >= outcome.authors) return "";
-    return `${outcome.authors - outcome.authorsWithWorklogs} von ${outcome.authors} Mitgliedern ohne Zeiten; Jira führt im Zeitraum Worklogs unter anderen Autoren: ${outcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ")}`;
+    if (!outcome || !outcome.fetched || outcome.source !== "jira" || !outcome.otherAuthors.length || !missingNames.length) return "";
+    return `Ohne Zeiten: ${missingNames.join(", ")}. Jira führt im Zeitraum Worklogs unter anderen Autoren: ${outcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ")}`;
   });
+  // Tempo source: members without any worklog may simply not have booked, or the token may not
+  // be allowed to see them. Shown softly next to the status.
+  const tempoMissingHint = $derived(outcome?.fetched && outcome.source === "tempoCloud" && missingNames.length ? `Ohne Zeiten im Zeitraum: ${missingNames.join(", ")}. Falls die Personen gebucht haben: Tempo-Berechtigung des Tokens prüfen (Worklogs der Mitglieder sehen).` : "");
+  // "Stand" is the OLDEST fetch in the range: later bookings and deletions since then are not in
+  // the cache until the range is refreshed.
+  const oldest = $derived(coverage?.oldestFetch ?? store.fetchStatus.lastSuccess);
+  const staleAfterMinutes = $derived(Math.max((store.settings?.refresh.intervalMinutes ?? 30) * 2, 60));
+  const stale = $derived(!!oldest && (Date.now() - new Date(oldest).getTime()) / 60000 > staleAfterMinutes);
+  const standTitle = $derived(
+    coverage?.oldestFetch
+      ? `Ältester Abruf im Zeitraum: ${formatDateTime(coverage.oldestFetch)}${coverage.newestFetch && coverage.newestFetch !== coverage.oldestFetch ? `, jüngster: ${formatDateTime(coverage.newestFetch)}` : ""}. Buchungen und Löschungen seitdem erscheinen erst nach „Aktualisieren“ oder der automatischen Aktualisierung.`
+      : "",
+  );
 
   function selectPreset(p: Preset) {
     store.preset = p;
@@ -83,9 +96,14 @@
     {:else if store.fetchStatus.lastError}
       <span class="warn" title={store.fetchStatus.lastError}><Icon name="warning" size={13} /> Abruf fehlgeschlagen</span>
     {:else if otherAuthorsHint}
-      <button type="button" class="warn link" onclick={() => (store.view = "settings")} title="{otherAuthorsHint}. Werden die Zeiten in Tempo gebucht, unter Einstellungen → Verbindung die Quelle „Tempo Cloud“ wählen."><Icon name="warning" size={13} /> Worklogs anderer Autoren gefunden</button>
+      <button type="button" class="warn link" onclick={() => (store.view = "settings")} title="{otherAuthorsHint} Werden die Zeiten in Tempo gebucht, unter Einstellungen → Verbindung die Quelle „Tempo Cloud“ wählen."><Icon name="warning" size={13} /> Worklogs anderer Autoren gefunden</button>
+    {:else if stale}
+      <button type="button" class="warn link" onclick={() => store.ensureData(true)} title={standTitle}><Icon name="warning" size={13} /> Stand: {relativeTime(oldest)}, Aktualisieren empfohlen</button>
     {:else}
-      <span class="faint" title={coverage?.newestFetch ? `Stand ${formatDate(coverage.newestFetch, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}>Stand: {relativeTime(coverage?.newestFetch ?? store.fetchStatus.lastSuccess)}</span>
+      <span class="faint" title={standTitle}>Stand: {relativeTime(oldest)}</span>
+    {/if}
+    {#if tempoMissingHint}
+      <span class="faint hint-dot" title={tempoMissingHint}><Icon name="info" size={13} /> {missingNames.length} ohne Zeiten</span>
     {/if}
     <button class="btn sm" type="button" onclick={() => store.ensureData(true)} disabled={fetching || !store.connected || !store.memberIds.length} title="Zeitraum neu aus Jira laden">
       <Icon name="refresh" size={14} /> Aktualisieren
@@ -159,6 +177,12 @@
   }
   .warn.link:hover {
     text-decoration: underline;
+  }
+  .hint-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: help;
   }
   .bar {
     width: 90px;

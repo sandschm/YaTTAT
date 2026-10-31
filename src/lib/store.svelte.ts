@@ -1,5 +1,5 @@
 // Global reactive state (Svelte 5 runes). One instance shared by all views.
-import { api, isTauri, on, type AuthStatus, type FetchStatus, type Member, type Settings, type Team } from "./api";
+import { api, isTauri, on, type AuthStatus, type CompareProgress, type FetchStatus, type Member, type Settings, type Team } from "./api";
 import { addDays, startOfDay, startOfWeek, toDateKey } from "./format";
 
 export type View = "team" | "member" | "tickets" | "settings";
@@ -49,6 +49,10 @@ function save(key: string, value: unknown) {
   }
 }
 
+function sameIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
+}
+
 export function computeRange(preset: Preset, customFrom: string, customTo: string, firstDay: number): { from: string; to: string } {
   const today = startOfDay(new Date());
   const y = today.getFullYear();
@@ -94,6 +98,7 @@ class AppStore {
   confirmRequest = $state<ConfirmRequest | null>(null);
   loginWindowOpen = $state(false);
   loginProgress = $state("");
+  compareProgress = $state<CompareProgress | null>(null);
   ready = $state(false);
   autoSwitched = false;
 
@@ -140,9 +145,18 @@ class AppStore {
       on<Settings>("settings-changed", (s) => (this.settings = s)),
       on<FetchStatus>("fetch-status", (f) => {
         const hadError = this.fetchStatus.lastError;
+        const wasInProgress = this.fetchStatus.inProgress;
         this.fetchStatus = f;
         if (f.lastError && f.lastError !== hadError) this.toast(`Abruf fehlgeschlagen: ${f.lastError}`, "error");
+        // A request made while another fetch ran was dropped by the backend. Once the running
+        // fetch is done, make sure the view that is displayed now is covered (no-op when it is).
+        if (wasInProgress && !f.inProgress && this.ready && !f.lastError) {
+          const r = f.lastRequest;
+          const same = !!r && r.from === this.range.from && r.to === this.range.to && sameIds(r.memberIds, this.memberIds);
+          if (!same || f.lastOutcome?.fetched) this.ensureData(false);
+        }
       }),
+      on<CompareProgress>("compare-progress", (p) => (this.compareProgress = p.source === "done" ? null : p)),
       on("data-changed", () => this.dataVersion++),
       on<string>("login-window", (s) => {
         this.loginWindowOpen = s === "opened";

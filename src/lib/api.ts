@@ -90,8 +90,8 @@ export interface FetchOutcome {
   from: string;
   to: string;
   authors: number;
-  /** Requested members with at least one worklog in the fetched range. */
-  authorsWithWorklogs: number;
+  /** Requested members (ids) without any worklog in the fetched range. */
+  authorsWithoutWorklogs: string[];
   issues: number;
   worklogs: number;
   removed: number;
@@ -108,6 +108,42 @@ export interface FetchStatus {
   lastError: string | null;
   lastRequest: { from: string; to: string; memberIds: string[] } | null;
   lastOutcome: FetchOutcome | null;
+}
+
+export interface DayDiff {
+  date: string;
+  jiraSeconds: number;
+  tempoSeconds: number;
+}
+
+export interface MemberComparison {
+  id: string;
+  jiraSeconds: number;
+  tempoSeconds: number;
+  jiraWorklogs: number;
+  tempoWorklogs: number;
+  differingDays: DayDiff[];
+}
+
+/** Result of reading the same range from Jira and Tempo. */
+export interface SourceComparison {
+  from: string;
+  to: string;
+  jiraSeconds: number;
+  tempoSeconds: number;
+  jiraIssues: number;
+  tempoIssues: number;
+  members: MemberComparison[];
+  jiraOtherAuthors: AuthorCount[];
+  tempoUnresolvedIssues: number;
+}
+
+export interface CompareProgress {
+  /** "jira", "tempo" or "done" */
+  source: string;
+  phase: string;
+  done: number;
+  total: number;
 }
 
 export interface CoverageInfo {
@@ -246,6 +282,7 @@ const tauriApi = {
   clearCache: () => invoke<CacheInfo>("clear_cache"),
   // tempo
   setTempoCloudToken: (token: string | null) => invoke<Settings>("set_tempo_cloud_token", { token }),
+  compareSources: (from: string, to: string, memberIds: string[]) => invoke<SourceComparison>("compare_sources", { from, to, memberIds }),
   // info
   getAppInfo: () => invoke<AppInfo>("get_app_info"),
 };
@@ -256,7 +293,7 @@ import { mockApi, mockListen } from "./mock";
 
 export const api: typeof tauriApi = isTauri ? tauriApi : (mockApi as unknown as typeof tauriApi);
 
-export type AppEvent = "auth-changed" | "settings-changed" | "fetch-status" | "data-changed" | "login-window" | "login-progress";
+export type AppEvent = "auth-changed" | "settings-changed" | "fetch-status" | "data-changed" | "login-window" | "login-progress" | "compare-progress";
 
 export function on<T = unknown>(event: AppEvent, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!isTauri) {

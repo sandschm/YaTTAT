@@ -16,6 +16,7 @@ import type {
   MemberStat,
   Project,
   Settings,
+  SourceComparison,
   Stats,
 } from "./api";
 
@@ -462,7 +463,7 @@ export const mockApi = {
     if (fetchStatus.inProgress) return { ...fetchStatus };
     const info = coverageInfo(from, to, memberIds);
     if (!force && info.coveredDays >= info.totalDays) {
-      fetchStatus = { ...fetchStatus, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: false, source: settings.tempo.source === "tempoCloud" ? "tempoCloud" : "jira", from, to, authors: 0, authorsWithWorklogs: 0, issues: 0, worklogs: 0, removed: 0, otherAuthors: [], unresolvedIssues: 0 } };
+      fetchStatus = { ...fetchStatus, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: false, source: settings.tempo.source === "tempoCloud" ? "tempoCloud" : "jira", from, to, authors: 0, authorsWithoutWorklogs: [], issues: 0, worklogs: 0, removed: 0, otherAuthors: [], unresolvedIssues: 0 } };
       return { ...fetchStatus };
     }
     fetchStatus = { ...fetchStatus, inProgress: true, progress: { phase: "issues", done: 0, total: 0 }, lastError: null, lastRequest: { from, to, memberIds } };
@@ -480,7 +481,7 @@ export const mockApi = {
       coverage.set(id, set);
     }
     const n = visibleWorklogs(from, to, memberIds).length;
-    fetchStatus = { inProgress: false, progress: null, lastSuccess: new Date().toISOString(), lastError: null, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: true, source: settings.tempo.source === "tempoCloud" ? "tempoCloud" : "jira", from, to, authors: memberIds.length, authorsWithWorklogs: new Set(visibleWorklogs(from, to, memberIds).map((w) => w.authorId)).size, issues: total, worklogs: n, removed: 0, otherAuthors: settings.tempo.source === "tempoCloud" ? [] : [{ id: "app", name: "Tempo Timesheets", count: 57 }], unresolvedIssues: 0 } };
+    fetchStatus = { inProgress: false, progress: null, lastSuccess: new Date().toISOString(), lastError: null, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: true, source: settings.tempo.source === "tempoCloud" ? "tempoCloud" : "jira", from, to, authors: memberIds.length, authorsWithoutWorklogs: memberIds.filter((id) => !visibleWorklogs(from, to, memberIds).some((w) => w.authorId === id)), issues: total, worklogs: n, removed: 0, otherAuthors: settings.tempo.source === "tempoCloud" ? [] : [{ id: "app", name: "Tempo Timesheets", count: 57 }], unresolvedIssues: 0 } };
     mockEmit("fetch-status", { ...fetchStatus });
     mockEmit("data-changed");
     return { ...fetchStatus };
@@ -503,6 +504,39 @@ export const mockApi = {
     settings.tempo.cloudTokenSet = !!token;
     mockEmit("settings-changed", structuredClone(settings));
     return structuredClone(settings);
+  },
+  compareSources: async (from: string, to: string, memberIds: string[]): Promise<SourceComparison> => {
+    const steps: [string, string, number][] = [["jira", "issues", 0], ["jira", "worklogs", 14], ["tempo", "worklogs", memberIds.length], ["tempo", "issues", 9]];
+    for (const [source, phase, total] of steps) {
+      for (let done = 0; done <= total; done++) {
+        mockEmit("compare-progress", { source, phase, done, total });
+        await delay(total ? 70 : 400);
+      }
+    }
+    mockEmit("compare-progress", { source: "done", phase: "done", done: 0, total: 0 });
+    const members = memberIds.map((id, i) => {
+      const logs = visibleWorklogs(from, to, [id]);
+      const tempo = logs.reduce((a, w) => a + w.seconds, 0);
+      // the mock pretends that Jira only knows the first member and half of the second one's days
+      const byDay = new Map<string, number>();
+      for (const w of logs) byDay.set(w.date, (byDay.get(w.date) ?? 0) + w.seconds);
+      const jiraDays = [...byDay.entries()].filter(([d]) => i === 0 || (i === 1 && d.endsWith("5")));
+      const jira = jiraDays.reduce((a, [, s]) => a + s, 0);
+      const jiraSet = new Map(jiraDays);
+      const differingDays = [...byDay.entries()].filter(([d, s]) => (jiraSet.get(d) ?? 0) !== s).map(([date, tempoSeconds]) => ({ date, jiraSeconds: jiraSet.get(date) ?? 0, tempoSeconds })).sort((a, b) => a.date.localeCompare(b.date));
+      return { id, jiraSeconds: jira, tempoSeconds: tempo, jiraWorklogs: i === 0 ? logs.length : i === 1 ? Math.round(logs.length / 3) : 0, tempoWorklogs: logs.length, differingDays };
+    });
+    return {
+      from,
+      to,
+      jiraSeconds: members.reduce((a, m) => a + m.jiraSeconds, 0),
+      tempoSeconds: members.reduce((a, m) => a + m.tempoSeconds, 0),
+      jiraIssues: 12,
+      tempoIssues: 14,
+      members,
+      jiraOtherAuthors: [{ id: "app", name: "Tempo Timesheets", count: 214 }],
+      tempoUnresolvedIssues: 2,
+    };
   },
   getAppInfo: async (): Promise<AppInfo> => ({
     version: "0.1.0-mock",

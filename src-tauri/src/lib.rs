@@ -109,6 +109,7 @@ pub fn run() {
             commands::get_issue_url,
             commands::clear_cache,
             commands::set_tempo_cloud_token,
+            commands::compare_sources,
             commands::get_app_info,
         ])
         .run(tauri::generate_context!())

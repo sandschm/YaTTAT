@@ -1,7 +1,7 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte";
-  import { api, type AppInfo, type AuthMethod, type JiraUser, type Member, type Project, type Settings, type Team } from "../lib/api";
-  import { formatDate, formatDateTime } from "../lib/format";
+  import { api, type AppInfo, type AuthMethod, type JiraUser, type Member, type Project, type Settings, type SourceComparison, type Team } from "../lib/api";
+  import { formatDate, formatDateTime, formatHours, formatSigned } from "../lib/format";
   import Icon from "../components/Icon.svelte";
   import Avatar from "../components/Avatar.svelte";
 
@@ -114,6 +114,35 @@
   }
   const lastOutcome = $derived(store.fetchStatus.lastOutcome);
   const otherAuthorsTotal = $derived((lastOutcome?.otherAuthors ?? []).reduce((a, o) => a + o.count, 0));
+  const missingNames = $derived((lastOutcome?.fetched ? lastOutcome.authorsWithoutWorklogs : []).map((id) => store.memberName(id)));
+
+  // ---- source comparison
+  let comparing = $state(false);
+  let comparison = $state<SourceComparison | null>(null);
+  let compareError = $state("");
+  let openDiff = $state<string | null>(null);
+  const tf = $derived(store.timeFormat);
+  async function runCompare() {
+    comparing = true;
+    compareError = "";
+    comparison = null;
+    try {
+      await saveNow();
+      comparison = await api.compareSources(store.range.from, store.range.to, store.memberIds);
+    } catch (e) {
+      compareError = String(e);
+    } finally {
+      comparing = false;
+      store.compareProgress = null;
+    }
+  }
+  const compareText = $derived.by(() => {
+    const p = store.compareProgress;
+    if (!p) return "Lade …";
+    const src = p.source === "jira" ? "Jira" : "Tempo";
+    if (p.phase === "issues") return p.total ? `${src}: Tickets ${p.done}/${p.total}` : `${src}: Tickets suchen …`;
+    return p.total ? `${src}: Worklogs ${p.done}/${p.total}` : `${src}: Worklogs …`;
+  });
 
   // ---- projects
   let projectQuery = $state("");
@@ -380,8 +409,72 @@
               </div>
               <span class="hint">Tempo → Einstellungen → API-Integration → neues Token. Das Token wird wie die Jira-Zugangsdaten verschlüsselt gespeichert.</span>
             </div>
-          {:else if lastOutcome && lastOutcome.fetched && lastOutcome.source === "jira" && otherAuthorsTotal > 0 && lastOutcome.authorsWithWorklogs < lastOutcome.authors}
-            <div class="error"><Icon name="warning" size={14} /> Beim letzten Abruf hatten {lastOutcome.authors - lastOutcome.authorsWithWorklogs} von {lastOutcome.authors} Mitgliedern keine Zeiten, obwohl Jira {otherAuthorsTotal} Worklogs anderer Autoren führt ({lastOutcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ")}). Bucht das Team in Tempo? Dann oben „Tempo Cloud“ wählen.</div>
+          {:else if lastOutcome && lastOutcome.fetched && lastOutcome.source === "jira" && otherAuthorsTotal > 0 && missingNames.length}
+            <div class="error"><Icon name="warning" size={14} /> Beim letzten Abruf hatten {missingNames.join(", ")} keine Zeiten, obwohl Jira {otherAuthorsTotal} Worklogs anderer Autoren führt ({lastOutcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ")}). Bucht das Team in Tempo? Dann oben „Tempo Cloud“ wählen.</div>
+          {/if}
+          {#if draft.tempo.source === "tempoCloud" && lastOutcome && lastOutcome.fetched && lastOutcome.source === "tempoCloud" && missingNames.length}
+            <p class="hint">Beim letzten Abruf ohne Zeiten: {missingNames.join(", ")}. Haben diese Personen gebucht, darf das Token ihre Worklogs in Tempo vermutlich nicht sehen (Team-Lead-Rolle oder „View all worklogs“).</p>
+          {/if}
+        </section>
+        <section class="card block">
+          <h3>Quellen-Abgleich</h3>
+          <p class="hint">
+            Liest den angezeigten Zeitraum ({formatDate(store.range.from, { day: "2-digit", month: "2-digit", year: "numeric" })} – {formatDate(store.range.to, { day: "2-digit", month: "2-digit", year: "numeric" })}) für
+            {store.team?.name ?? "das Team"} aus Jira und aus Tempo und vergleicht beide je Mitglied und Tag. Der Cache bleibt unverändert. Benötigt ein Tempo-API-Token.
+          </p>
+          <div class="row wrap">
+            <button class="btn" type="button" onclick={runCompare} disabled={comparing || !store.connected || !draft.tempo.cloudTokenSet || !store.memberIds.length}>
+              {#if comparing}<span class="spin"><Icon name="refresh" size={14} /></span>{:else}<Icon name="layers" size={14} />{/if} Abgleich starten
+            </button>
+            {#if comparing}<span class="faint">{compareText}</span>{/if}
+            {#if !draft.tempo.cloudTokenSet}<span class="faint">Zuerst oben ein Tempo-API-Token speichern.</span>{/if}
+          </div>
+          {#if compareError}<div class="error"><Icon name="warning" size={14} /> {compareError}</div>{/if}
+          {#if comparison}
+            {@const diff = comparison.tempoSeconds - comparison.jiraSeconds}
+            <p class="compare-summary">
+              Jira <span class="mono">{formatHours(comparison.jiraSeconds, tf)}</span> auf {comparison.jiraIssues} Tickets ·
+              Tempo <span class="mono">{formatHours(comparison.tempoSeconds, tf)}</span> auf {comparison.tempoIssues} Tickets ·
+              Differenz <span class="mono" class:pos={diff === 0} class:neg={diff !== 0}>{formatSigned(diff, tf)}</span>
+              {#if diff === 0}<span class="badge success">identisch</span>{/if}
+            </p>
+            <table class="compare">
+              <thead>
+                <tr><th>Mitglied</th><th class="num">Jira</th><th class="num">Tempo</th><th class="num">Differenz</th><th class="num">Tage mit Abweichung</th></tr>
+              </thead>
+              <tbody>
+                {#each comparison.members as m (m.id)}
+                  {@const d = m.tempoSeconds - m.jiraSeconds}
+                  <tr class:clickable={m.differingDays.length > 0} onclick={() => (openDiff = openDiff === m.id ? null : m.id)}>
+                    <td><span class="row"><Avatar name={store.memberName(m.id)} url={store.memberById(m.id)?.avatarUrl} color={store.memberColor(m.id)} size={22} />{store.memberName(m.id)}</span></td>
+                    <td class="num mono">{formatHours(m.jiraSeconds, tf)}<span class="faint small"> ({m.jiraWorklogs})</span></td>
+                    <td class="num mono">{formatHours(m.tempoSeconds, tf)}<span class="faint small"> ({m.tempoWorklogs})</span></td>
+                    <td class="num mono" class:neg={d !== 0}>{formatSigned(d, tf)}</td>
+                    <td class="num">{m.differingDays.length}{#if m.differingDays.length} <Icon name="chevronDown" size={12} />{/if}</td>
+                  </tr>
+                  {#if openDiff === m.id && m.differingDays.length}
+                    <tr class="diff-row">
+                      <td colspan="5">
+                        <ul class="diff-days">
+                          {#each m.differingDays as day (day.date)}
+                            <li><span class="mono">{formatDate(day.date, { weekday: "short", day: "2-digit", month: "2-digit" })}</span> Jira <span class="mono">{formatHours(day.jiraSeconds, tf)}</span> · Tempo <span class="mono">{formatHours(day.tempoSeconds, tf)}</span></li>
+                          {/each}
+                        </ul>
+                      </td>
+                    </tr>
+                  {/if}
+                {/each}
+              </tbody>
+            </table>
+            {#if comparison.jiraOtherAuthors.length}
+              <p class="hint">Jira führt im Zeitraum zusätzlich Worklogs unter: {comparison.jiraOtherAuthors.map((o) => `${o.name || o.id} (${o.count})`).join(", ")}.</p>
+            {/if}
+            {#if comparison.tempoUnresolvedIssues}
+              <p class="hint">{comparison.tempoUnresolvedIssues} Tempo-Worklogs liegen auf Tickets, die in Jira nicht lesbar sind, und fehlen in beiden Summen.</p>
+            {/if}
+            <p class="hint">
+              Ist Tempo höher, bucht das Team in Tempo und Jira ordnet die Worklogs anderen Autoren zu: Quelle „Tempo Cloud“ wählen. Ist Jira höher, wurden Zeiten direkt in Jira gebucht, die Tempo erst mit dem nächtlichen Abgleich übernimmt, oder das Token sieht nicht alle Mitglieder.
+            </p>
           {/if}
         </section>
       {:else if tab === "projects"}
@@ -603,7 +696,7 @@
               <dt>Letzter Abruf</dt><dd>{store.fetchStatus.lastSuccess ? formatDateTime(store.fetchStatus.lastSuccess) : "–"}</dd>
               {#if lastOutcome && lastOutcome.fetched}
                 <dt>Quelle</dt><dd>{lastOutcome.source === "tempoCloud" ? "Tempo Cloud" : "Jira-Worklogs"}</dd>
-                <dt>Ergebnis</dt><dd>{lastOutcome.worklogs} Worklogs von {lastOutcome.authorsWithWorklogs} der {lastOutcome.authors} Mitglieder auf {lastOutcome.issues} Tickets ({formatDate(lastOutcome.from, { day: "2-digit", month: "2-digit", year: "numeric" })} – {formatDate(lastOutcome.to, { day: "2-digit", month: "2-digit", year: "numeric" })}){lastOutcome.removed ? `, ${lastOutcome.removed} entfernt` : ""}</dd>
+                <dt>Ergebnis</dt><dd>{lastOutcome.worklogs} Worklogs von {lastOutcome.authors - lastOutcome.authorsWithoutWorklogs.length} der {lastOutcome.authors} Mitglieder auf {lastOutcome.issues} Tickets ({formatDate(lastOutcome.from, { day: "2-digit", month: "2-digit", year: "numeric" })} – {formatDate(lastOutcome.to, { day: "2-digit", month: "2-digit", year: "numeric" })}){lastOutcome.removed ? `, ${lastOutcome.removed} entfernt` : ""}</dd>
                 {#if lastOutcome.otherAuthors.length}
                   <dt>Andere Autoren</dt><dd>{lastOutcome.otherAuthors.map((o) => `${o.name || o.id} (${o.count})`).join(", ")}<span class="hint"> Worklogs im Zeitraum auf den gefundenen Tickets, die Jira nicht einem Mitglied zuordnet.</span></dd>
                 {/if}
@@ -900,6 +993,50 @@
     display: flex;
     flex-direction: column;
     line-height: 1.25;
+  }
+  .compare-summary {
+    margin: 10px 0 8px;
+  }
+  .compare-summary .pos {
+    color: var(--success);
+  }
+  .neg {
+    color: var(--danger);
+  }
+  table.compare {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  table.compare th {
+    text-align: left;
+    color: var(--text-2);
+    font-weight: 500;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.compare td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  table.compare tr.clickable {
+    cursor: pointer;
+  }
+  table.compare tr.clickable:hover td {
+    background: var(--surface-2);
+  }
+  .diff-row td {
+    background: var(--surface-2);
+  }
+  .diff-days {
+    list-style: none;
+    margin: 0;
+    padding: 2px 0 2px 30px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 2px 16px;
+    font-size: 12px;
   }
   .num {
     text-align: right;

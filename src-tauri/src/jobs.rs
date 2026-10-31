@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-use yattat_core::fetch::{fetch_range, FetchProgress, FetchRequest};
+use yattat_core::fetch::{fetch_range, FetchProgress, FetchRequest, SourceComparison};
 use yattat_core::jira::JiraClient;
 use yattat_core::models::*;
 use yattat_core::secrets;
@@ -237,32 +237,124 @@ pub async fn fetch_worklogs(
     result.map(|_| status)
 }
 
-/// Re-fetches the last requested range in the background when auto refresh is on.
+/// Re-fetches the last requested range in the background when auto refresh is on. "Due" is
+/// judged by the age of the cached days themselves, so a range that was last read days ago is
+/// refreshed shortly after the app starts, not only `interval` after the first request.
 pub async fn refresh_loop(app: AppHandle, state: Arc<AppState>) {
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await;
         let settings = state.settings();
-        let due = {
+        let interval = settings.refresh.interval_minutes.max(1) as i64 * 60;
+        let req = {
             let f = state.fetch.read().unwrap();
-            settings.refresh.auto
-                && state.is_authenticated()
-                && !f.in_progress
-                && f.last_request.is_some()
-                && f.last_success
-                    .map(|t| {
-                        (Utc::now() - t).num_seconds()
-                            >= settings.refresh.interval_minutes.max(1) as i64 * 60
-                    })
-                    .unwrap_or(false)
+            if !settings.refresh.auto || !state.is_authenticated() || f.in_progress {
+                continue;
+            }
+            match f.last_request.clone() {
+                Some(r) => r,
+                None => continue,
+            }
+        };
+        let old_enough = |t: chrono::DateTime<Utc>| (Utc::now() - t).num_seconds() >= interval;
+        let due = match state
+            .store
+            .coverage(&req.member_ids, req.from, req.to)
+            .ok()
+            .and_then(|c| c.oldest_fetch)
+        {
+            Some(oldest) => old_enough(oldest),
+            None => state
+                .fetch
+                .read()
+                .unwrap()
+                .last_success
+                .map(old_enough)
+                .unwrap_or(false),
         };
         if !due {
             continue;
         }
-        let Some(req) = state.fetch.read().unwrap().last_request.clone() else {
-            continue;
-        };
         if let Err(e) = fetch_worklogs(&app, &state, req.from, req.to, req.member_ids, true).await {
             tracing::info!("auto refresh failed: {e}");
         }
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareProgress {
+    /// "jira" or "tempo"
+    pub source: String,
+    pub phase: String,
+    pub done: usize,
+    pub total: usize,
+}
+
+/// Reads the range from Jira and Tempo and compares them; progress goes out as `compare-progress`.
+pub async fn compare_sources(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    from: NaiveDate,
+    to: NaiveDate,
+    member_ids: Vec<String>,
+) -> Result<SourceComparison, String> {
+    let settings = state.settings();
+    let jira = state.jira()?;
+    let tempo = state.tempo_cloud().ok_or(
+        "Für den Abgleich wird ein Tempo-API-Token benötigt (Einstellungen → Verbindung → Quelle der Zeiten).",
+    )?;
+    let members = settings.members_by_ids(&member_ids);
+    if members.is_empty() {
+        return Err("Keine Mitglieder im Team".into());
+    }
+    let req = FetchRequest {
+        from,
+        to,
+        author_ids: members.iter().map(|m| m.id.clone()).collect(),
+        project_keys: settings.selection.project_keys.clone(),
+        force: true,
+    };
+    let app2 = app.clone();
+    let last_emit = Mutex::new(Instant::now() - Duration::from_secs(1));
+    let progress = move |source: &str, p: FetchProgress| {
+        let finished = p.total > 0 && p.done == p.total;
+        let mut last = last_emit.lock().unwrap();
+        if finished || p.done == 0 || last.elapsed() >= Duration::from_millis(150) {
+            *last = Instant::now();
+            emit(
+                &app2,
+                "compare-progress",
+                CompareProgress {
+                    source: source.into(),
+                    phase: p.phase,
+                    done: p.done,
+                    total: p.total,
+                },
+            );
+        }
+    };
+    let result = yattat_core::fetch::compare_sources(
+        &jira,
+        &tempo,
+        &state.store,
+        &req,
+        Utc::now(),
+        &progress,
+    )
+    .await
+    .map_err(|e| {
+        handle_auth_error(app, state, &e);
+        e.to_string()
+    });
+    emit(
+        app,
+        "compare-progress",
+        CompareProgress {
+            source: "done".into(),
+            phase: "done".into(),
+            done: 0,
+            total: 0,
+        },
+    );
+    result
 }

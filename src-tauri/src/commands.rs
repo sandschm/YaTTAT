@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use yattat_core::export::{self, ExportRow};
+use yattat_core::fetch::SourceComparison;
 use yattat_core::models::*;
 use yattat_core::secrets;
 use yattat_core::settings::{AuthMethod, Settings, PALETTE};
@@ -452,6 +453,18 @@ pub async fn export_worklogs(
     };
     std::fs::write(&path, content).map_err(err)?;
     Ok(rows.len())
+}
+
+/// Reads the range from both sources and compares them (cache untouched).
+#[tauri::command]
+pub async fn compare_sources(
+    app: AppHandle,
+    state: S<'_>,
+    from: NaiveDate,
+    to: NaiveDate,
+    member_ids: Vec<String>,
+) -> Result<SourceComparison, String> {
+    jobs::compare_sources(&app, &state, from, to, member_ids).await
 }
 
 #[tauri::command]

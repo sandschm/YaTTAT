@@ -39,6 +39,8 @@ YaTTAT liest nur aus Jira und schreibt nichts zurück.
 - **Quelle der Zeiten**: Jira-Worklogs (Standard) oder **Tempo Cloud** mit Tempo-API-Token. Bucht das
   Team in Tempo, führt Jira die Worklogs oft unter dem Tempo-App-Konto; dann liefert nur die Tempo-API
   die echten Autoren. YaTTAT zeigt nach dem Abruf an, wenn Jira Worklogs anderen Autoren zuordnet.
+- **Quellen-Abgleich**: liest einen Zeitraum aus Jira und Tempo und vergleicht beide je Mitglied und
+  Tag, als Nachweis, dass keine Zeiten fehlen.
 - **Projektauswahl** (optional): Auswertung auf bestimmte Projekte beschränken.
 - Hell-/Dunkelmodus, Zeitformat Stunden:Minuten oder dezimal, Wochenbeginn Montag oder Sonntag.
 
@@ -84,8 +86,10 @@ das Soll passt. Die Farbe gilt in allen Diagrammen.
 
 ### 3️⃣ Zeitraum wählen
 
-In der Kopfzeile Team und Zeitraum wählen. Fehlende Tage werden automatisch aus Jira geladen; der
-Fortschritt steht rechts („Worklogs 12/80“). **Aktualisieren** lädt den Zeitraum jederzeit neu.
+In der Kopfzeile Team und Zeitraum wählen. Fehlende Tage werden automatisch geladen; der
+Fortschritt steht rechts („Worklogs 12/80“). **Stand** nennt den ältesten Abruf im Zeitraum; ist er
+älter als das doppelte Aktualisierungsintervall, erscheint „Aktualisieren empfohlen“. **Aktualisieren**
+lädt den Zeitraum jederzeit neu und übernimmt nachträgliche Buchungen und Löschungen.
 
 <img src="docs/screenshots/step-3-zeitraum.png" width="760" alt="Kopfzeile: Team, Zeitraum-Presets, Stand und Aktualisieren">
 
@@ -123,6 +127,11 @@ Projekt oder Typ; ein Klick auf die Zeile zeigt die Worklogs.
 > führt Jira die Zeiten unter einem anderen Konto (typisch: „Tempo Timesheets“). Dann unter
 > Einstellungen → Verbindung die Quelle **Tempo Cloud** wählen. Einstellungen → Info zeigt die Details
 > des letzten Abrufs.
+>
+> ✅ **Sicher sein, dass nichts fehlt?** Einstellungen → Verbindung → **Quellen-Abgleich** liest den
+> angezeigten Zeitraum aus beiden Quellen und zeigt je Mitglied und Tag, wo Jira und Tempo
+> voneinander abweichen. Zeiten gehen nur verloren, wenn eine Quelle sie nicht sieht (Autor, Rechte),
+> der Projektfilter sie ausschließt oder der Cache veraltet ist; Abbrüche markieren nie Tage als geladen.
 
 ## Entwicklung
 

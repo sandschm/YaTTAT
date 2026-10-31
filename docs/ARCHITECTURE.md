@@ -23,7 +23,7 @@ Ergebnisse als Events an das Frontend. YaTTAT schreibt nie nach Jira.
 | `jira` | `JiraClient` (Cloud/DC): Benutzer-Suche, Projekte, JQL-Suche mit Pagination, Worklogs je Ticket; `jira::parse` (JSON → Modell, ADF-Kommentare) |
 | `storage` | SQLite (`rusqlite`, WAL): Tabellen `issues`, `worklogs`, `projects`, `coverage`, `meta` |
 | `tempo` | `TempoCloud`: Tempo-API v4 mit Token, Worklogs je Benutzer (paginiert), Umwandlung ins Cache-Modell (`tempo-<id>`) |
-| `fetch` | Abruf eines Zeitraums für eine Mitgliederliste. Quelle Jira: JQL `worklogAuthor in (…) AND worklogDate …`, dann Worklogs je Ticket (4 parallel), Filter nach Autor und Tag, Zählung fremder Autoren. Quelle Tempo: Worklogs je Mitglied aus Tempo, Tickets per ID aus Jira. Danach Cache-Update inkl. Löschen verschwundener Worklogs und Coverage |
+| `fetch` | Abruf eines Zeitraums für eine Mitgliederliste; `compare_sources` liest beide Quellen und vergleicht je Mitglied und Tag. Quelle Jira: JQL `worklogAuthor in (…) AND worklogDate …`, dann Worklogs je Ticket (4 parallel), Filter nach Autor und Tag, Zählung fremder Autoren. Quelle Tempo: Worklogs je Mitglied aus Tempo, Tickets per ID aus Jira. Danach Cache-Update inkl. Löschen verschwundener Worklogs und Coverage |
 | `stats` | Aggregation pro Team, Mitglied, Tag, Projekt, Ticket, Tickettyp und Wochentag; Soll aus Wochenmuster × Wochenstunden |
 | `export` | CSV (Semikolon, BOM für Excel) und JSON der Worklogs, optional pro Tag/Mitglied/Ticket zusammengefasst |
 
@@ -57,7 +57,8 @@ Aktualisierung wiederholt den zuletzt angeforderten Zeitraum im eingestellten In
 ### Events (Backend → Frontend)
 
 `auth-changed`, `settings-changed`, `fetch-status` (Fortschritt und Ergebnis des Abrufs),
-`data-changed` (Cache hat sich geändert, Views laden neu), `login-window`, `login-progress`.
+`data-changed` (Cache hat sich geändert, Views laden neu), `compare-progress` (Quellen-Abgleich),
+`login-window`, `login-progress`.
 
 ## Frontend
 

@@ -1,6 +1,6 @@
 {
   "name": "yattat",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Yet another Time Tracking Analysis Tool – Zeiterfassungen aus Jira auswerten",
   "type": "module",
   "private": true,
