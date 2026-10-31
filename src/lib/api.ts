@@ -6,6 +6,7 @@ export type Deployment = "unknown" | "cloud" | "dataCenter";
 export type AuthMethod = "browserSession" | "password" | "personalAccessToken" | "apiToken";
 export type TimeFormat = "hoursMinutes" | "decimal";
 export type Theme = "system" | "light" | "dark";
+export type LanguageSetting = "system" | "de" | "en";
 export type WorklogSource = "jiraWorklogs" | "tempoCloud";
 
 export interface Member {
@@ -32,7 +33,7 @@ export interface Settings {
   teams: Team[];
   work: { hoursPerWeekday: number[]; firstDayOfWeek: number; timeFormat: TimeFormat; showTargets: boolean };
   refresh: { auto: boolean; intervalMinutes: number };
-  behavior: { theme: Theme };
+  behavior: { theme: Theme; language: LanguageSetting };
   tempo: { source: WorklogSource; cloudApiBase: string; cloudTokenSet: boolean };
   projectColors: Record<string, string>;
 }

@@ -61,11 +61,11 @@ const defaultSettings: Settings = {
       name: "Team Horizon",
       members: [member(users[0], "#2f6fed"), member(users[1], "#17956b"), member(users[2], "#e8572a"), member(users[3], "#8b5cf6", 30)],
     },
-    { id: "team-2", name: "Plattform", members: [member(users[4], "#ec4899"), member(users[5], "#0ea5e9"), member(users[0], "#2f6fed")] },
+    { id: "team-2", name: "Platform", members: [member(users[4], "#ec4899"), member(users[5], "#0ea5e9"), member(users[0], "#2f6fed")] },
   ],
   work: { hoursPerWeekday: [8, 8, 8, 8, 8, 0, 0], firstDayOfWeek: 0, timeFormat: "hoursMinutes", showTargets: true },
   refresh: { auto: true, intervalMinutes: 30 },
-  behavior: { theme: "system" },
+  behavior: { theme: "system", language: "system" },
   tempo: { source: "jiraWorklogs", cloudApiBase: "https://api.tempo.io/4", cloudTokenSet: false },
   projectColors: { WEB: "#3b82f6", API: "#10b981", OPS: "#f59e0b" },
 };
@@ -74,10 +74,10 @@ let settings: Settings = structuredClone(defaultSettings);
 let authenticated = true;
 
 const projects: Project[] = [
-  { id: "1", key: "WEB", name: "Web-Portal", avatarUrl: null, color: "#3b82f6" },
+  { id: "1", key: "WEB", name: "Web Portal", avatarUrl: null, color: "#3b82f6" },
   { id: "2", key: "API", name: "Backend API", avatarUrl: null, color: "#10b981" },
-  { id: "3", key: "OPS", name: "Betrieb", avatarUrl: null, color: "#f59e0b" },
-  { id: "4", key: "HR", name: "HR-Portal", avatarUrl: null, color: "#8b5cf6" },
+  { id: "3", key: "OPS", name: "Operations", avatarUrl: null, color: "#f59e0b" },
+  { id: "4", key: "HR", name: "HR Portal", avatarUrl: null, color: "#8b5cf6" },
 ];
 
 interface MockIssue {
@@ -93,22 +93,22 @@ interface MockIssue {
 }
 
 const issues: MockIssue[] = [
-  { key: "WEB-100", summary: "Dashboard-Relaunch", projectKey: "WEB", issueType: "Epic", status: "In Arbeit", statusCategory: "indeterminate", epicKey: null, originalEstimateS: null, weights: {} },
-  { key: "WEB-101", summary: "Login-Seite: Fehlermeldung bei abgelaufener Session", projectKey: "WEB", issueType: "Bug", status: "Erledigt", statusCategory: "done", epicKey: null, originalEstimateS: 7200, weights: { me: 3, alex: 1 } },
-  { key: "WEB-104", summary: "Dashboard-Widgets per Drag & Drop anordnen", projectKey: "WEB", issueType: "Story", status: "In Arbeit", statusCategory: "indeterminate", epicKey: "WEB-100", originalEstimateS: 28800, weights: { me: 4, mira: 2 } },
-  { key: "WEB-105", summary: "Widget-Layout speichern", projectKey: "WEB", issueType: "Sub-task", status: "In Arbeit", statusCategory: "indeterminate", epicKey: "WEB-100", originalEstimateS: 7200, weights: { me: 2 } },
-  { key: "WEB-110", summary: "Barrierefreiheit: Kontraste im Dunkelmodus prüfen", projectKey: "WEB", issueType: "Task", status: "Review", statusCategory: "indeterminate", epicKey: "WEB-100", originalEstimateS: 10800, weights: { alex: 4, jonas: 1 } },
-  { key: "WEB-118", summary: "Onboarding-Tour für neue Nutzer", projectKey: "WEB", issueType: "Story", status: "To Do", statusCategory: "new", epicKey: "WEB-100", originalEstimateS: 36000, weights: { mira: 3, alex: 1 } },
-  { key: "API-70", summary: "Public API v2", projectKey: "API", issueType: "Epic", status: "In Arbeit", statusCategory: "indeterminate", epicKey: null, originalEstimateS: null, weights: {} },
-  { key: "API-77", summary: "Rate-Limiting für /search Endpunkt", projectKey: "API", issueType: "Story", status: "Erledigt", statusCategory: "done", epicKey: "API-70", originalEstimateS: 14400, weights: { alex: 3, jonas: 3 } },
-  { key: "API-80", summary: "Worklog-Webhook an Tempo weiterleiten", projectKey: "API", issueType: "Task", status: "In Arbeit", statusCategory: "indeterminate", epicKey: "API-70", originalEstimateS: 5400, weights: { jonas: 4, me: 1 } },
-  { key: "API-81", summary: "Flaky Test: SessionRefreshIT", projectKey: "API", issueType: "Bug", status: "In Arbeit", statusCategory: "indeterminate", epicKey: null, originalEstimateS: 3600, weights: { alex: 2, mira: 1 } },
-  { key: "API-85", summary: "OpenAPI-Spezifikation für v2 generieren", projectKey: "API", issueType: "Story", status: "Review", statusCategory: "indeterminate", epicKey: "API-70", originalEstimateS: 21600, weights: { mira: 4, jonas: 2 } },
-  { key: "OPS-12", summary: "Zertifikat jira.example.com erneuern", projectKey: "OPS", issueType: "Task", status: "Erledigt", statusCategory: "done", epicKey: null, originalEstimateS: 3600, weights: { me: 1, alex: 1 } },
-  { key: "OPS-15", summary: "Monitoring-Alarme für Worker-Queue", projectKey: "OPS", issueType: "Task", status: "In Arbeit", statusCategory: "indeterminate", epicKey: null, originalEstimateS: 14400, weights: { jonas: 2, me: 1 } },
-  { key: "OPS-19", summary: "Daily Standup / Meetings", projectKey: "OPS", issueType: "Task", status: "In Arbeit", statusCategory: "indeterminate", epicKey: null, originalEstimateS: null, weights: { me: 2, alex: 2, mira: 2, jonas: 2, lea: 2, tim: 2 } },
-  { key: "HR-301", summary: "Urlaubsantrag: Vertretungsregel", projectKey: "HR", issueType: "Story", status: "In Arbeit", statusCategory: "indeterminate", epicKey: null, originalEstimateS: 18000, weights: { lea: 4, tim: 2 } },
-  { key: "HR-305", summary: "Gehaltsabrechnung: PDF-Export", projectKey: "HR", issueType: "Task", status: "To Do", statusCategory: "new", epicKey: null, originalEstimateS: 10800, weights: { tim: 4, lea: 1 } },
+  { key: "WEB-100", summary: "Dashboard relaunch", projectKey: "WEB", issueType: "Epic", status: "In Progress", statusCategory: "indeterminate", epicKey: null, originalEstimateS: null, weights: {} },
+  { key: "WEB-101", summary: "Login page: error message on expired session", projectKey: "WEB", issueType: "Bug", status: "Done", statusCategory: "done", epicKey: null, originalEstimateS: 7200, weights: { me: 3, alex: 1 } },
+  { key: "WEB-104", summary: "Arrange dashboard widgets by drag & drop", projectKey: "WEB", issueType: "Story", status: "In Progress", statusCategory: "indeterminate", epicKey: "WEB-100", originalEstimateS: 28800, weights: { me: 4, mira: 2 } },
+  { key: "WEB-105", summary: "Save widget layout", projectKey: "WEB", issueType: "Sub-task", status: "In Progress", statusCategory: "indeterminate", epicKey: "WEB-100", originalEstimateS: 7200, weights: { me: 2 } },
+  { key: "WEB-110", summary: "Accessibility: check contrasts in dark mode", projectKey: "WEB", issueType: "Task", status: "Review", statusCategory: "indeterminate", epicKey: "WEB-100", originalEstimateS: 10800, weights: { alex: 4, jonas: 1 } },
+  { key: "WEB-118", summary: "Onboarding tour for new users", projectKey: "WEB", issueType: "Story", status: "To Do", statusCategory: "new", epicKey: "WEB-100", originalEstimateS: 36000, weights: { mira: 3, alex: 1 } },
+  { key: "API-70", summary: "Public API v2", projectKey: "API", issueType: "Epic", status: "In Progress", statusCategory: "indeterminate", epicKey: null, originalEstimateS: null, weights: {} },
+  { key: "API-77", summary: "Rate limiting for the /search endpoint", projectKey: "API", issueType: "Story", status: "Done", statusCategory: "done", epicKey: "API-70", originalEstimateS: 14400, weights: { alex: 3, jonas: 3 } },
+  { key: "API-80", summary: "Forward worklog webhook to Tempo", projectKey: "API", issueType: "Task", status: "In Progress", statusCategory: "indeterminate", epicKey: "API-70", originalEstimateS: 5400, weights: { jonas: 4, me: 1 } },
+  { key: "API-81", summary: "Flaky Test: SessionRefreshIT", projectKey: "API", issueType: "Bug", status: "In Progress", statusCategory: "indeterminate", epicKey: null, originalEstimateS: 3600, weights: { alex: 2, mira: 1 } },
+  { key: "API-85", summary: "Generate OpenAPI specification for v2", projectKey: "API", issueType: "Story", status: "Review", statusCategory: "indeterminate", epicKey: "API-70", originalEstimateS: 21600, weights: { mira: 4, jonas: 2 } },
+  { key: "OPS-12", summary: "Renew certificate jira.example.com", projectKey: "OPS", issueType: "Task", status: "Done", statusCategory: "done", epicKey: null, originalEstimateS: 3600, weights: { me: 1, alex: 1 } },
+  { key: "OPS-15", summary: "Monitoring alerts for the worker queue", projectKey: "OPS", issueType: "Task", status: "In Progress", statusCategory: "indeterminate", epicKey: null, originalEstimateS: 14400, weights: { jonas: 2, me: 1 } },
+  { key: "OPS-19", summary: "Daily standup / meetings", projectKey: "OPS", issueType: "Task", status: "In Progress", statusCategory: "indeterminate", epicKey: null, originalEstimateS: null, weights: { me: 2, alex: 2, mira: 2, jonas: 2, lea: 2, tim: 2 } },
+  { key: "HR-301", summary: "Leave request: substitution rule", projectKey: "HR", issueType: "Story", status: "In Progress", statusCategory: "indeterminate", epicKey: null, originalEstimateS: 18000, weights: { lea: 4, tim: 2 } },
+  { key: "HR-305", summary: "Payroll: PDF export", projectKey: "HR", issueType: "Task", status: "To Do", statusCategory: "new", epicKey: null, originalEstimateS: 10800, weights: { tim: 4, lea: 1 } },
 ];
 
 interface MockWorklog {
@@ -135,7 +135,7 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const comments = ["", "", "Analyse", "Umsetzung", "Review", "Tests", "Abstimmung mit Team", "Bugfix", "Doku", "Pairing"];
+const comments = ["", "", "Analysis", "Implementation", "Review", "Tests", "Alignment with the team", "Bug fix", "Docs", "Pairing"];
 
 function generateWorklogs(): MockWorklog[] {
   const rnd = mulberry32(42);

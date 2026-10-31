@@ -8,16 +8,22 @@
   import MemberView from "./views/MemberView.svelte";
   import TicketsView from "./views/TicketsView.svelte";
   import SettingsView from "./views/SettingsView.svelte";
+  import { i18n, resolveLanguage, t, type Key } from "./lib/i18n.svelte";
 
-  const nav: { id: View; label: string; icon: string }[] = [
-    { id: "team", label: "Team", icon: "users" },
-    { id: "member", label: "Mitglied", icon: "user" },
-    { id: "tickets", label: "Tickets", icon: "ticket" },
-    { id: "settings", label: "Einstellungen", icon: "settings" },
+  const nav: { id: View; label: Key; icon: string }[] = [
+    { id: "team", label: "nav.team", icon: "users" },
+    { id: "member", label: "nav.member", icon: "user" },
+    { id: "tickets", label: "nav.tickets", icon: "ticket" },
+    { id: "settings", label: "nav.settings", icon: "settings" },
   ];
 
   onMount(() => {
     store.init();
+  });
+
+  $effect(() => {
+    i18n.lang = resolveLanguage(store.settings?.behavior.language);
+    document.documentElement.lang = i18n.lang;
   });
 
   $effect(() => {
@@ -63,7 +69,7 @@
       {#each nav as item (item.id)}
         <button class="nav-item" class:active={store.view === item.id} type="button" onclick={() => (store.view = item.id)}>
           <Icon name={item.icon} size={17} />
-          <span>{item.label}</span>
+          <span>{t(item.label)}</span>
         </button>
       {/each}
     </nav>
@@ -71,12 +77,12 @@
       {#if store.connected}
         <div class="conn ok" title={store.auth.server?.baseUrl ?? ""}>
           <span class="dot" style="background: var(--success)"></span>
-          <span class="ellipsis">{store.auth.user?.displayName ?? "Verbunden"}</span>
+          <span class="ellipsis">{store.auth.user?.displayName ?? t("app.connected")}</span>
         </div>
       {:else}
         <button class="conn warn" type="button" onclick={() => (store.view = "settings")}>
           <span class="dot" style="background: var(--warning)"></span>
-          <span class="ellipsis">Nicht mit Jira verbunden</span>
+          <span class="ellipsis">{t("app.notConnected")}</span>
         </button>
       {/if}
     </div>
@@ -98,7 +104,7 @@
         {/if}
       </div>
     {:else}
-      <div class="loading faint">Lade …</div>
+      <div class="loading faint">{t("common.loading")}</div>
     {/if}
   </main>
 </div>

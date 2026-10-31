@@ -30,8 +30,8 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "shortDescription": "Zeiterfassungen aus Jira auswerten",
-    "longDescription": "YaTTAT ruft die in Jira gebuchten Zeiten eines Teams ab und zeigt Gesamtzeiten, Zeiten pro Ticket und Statistiken pro Teammitglied.",
+    "shortDescription": "Analyse Jira time tracking per team member",
+    "longDescription": "YaTTAT fetches the time logged in Jira (or Tempo) by a team and shows total hours, hours per issue and statistics per team member.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

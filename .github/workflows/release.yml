@@ -90,11 +90,11 @@ jobs:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: "YaTTAT ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}"
           releaseBody: |
-            Zeiterfassungen aus Jira auswerten: Gesamtzeiten und Zeiten pro Ticket je Teammitglied. Installationspakete:
-            - macOS: `.dmg` (universal). Ohne Signatur: Rechtsklick → Öffnen bzw. `xattr -dr com.apple.quarantine /Applications/YaTTAT.app`.
-            - Windows: `.msi` oder `-setup.exe` (NSIS, Installation pro Benutzer).
-            - Linux: `.deb`, `.rpm` oder `.AppImage`.
-            Details siehe README.
+            Analyse Jira time tracking: total hours and hours per issue for every team member. Installers:
+            - macOS: `.dmg` (universal). Unsigned: right-click → Open or `xattr -dr com.apple.quarantine /Applications/YaTTAT.app`.
+            - Windows: `.msi` or `-setup.exe` (NSIS, per-user install).
+            - Linux: `.deb`, `.rpm` or `.AppImage`.
+            See the README for details.
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}

@@ -198,12 +198,9 @@ pub fn compute(
         }
         by_weekday[w.date.weekday().num_days_from_monday() as usize] += w.seconds;
         *by_project.entry(project.clone()).or_insert(0) += w.seconds;
+        // Unknown issue type: empty key, the UI shows its own "unknown" label.
         *by_type
-            .entry(
-                issue
-                    .map(|i| i.issue_type.clone())
-                    .unwrap_or_else(|| "Unbekannt".into()),
-            )
+            .entry(issue.map(|i| i.issue_type.clone()).unwrap_or_default())
             .or_insert(0) += w.seconds;
         let m = acc.entry(w.author_id.clone()).or_insert_with(|| MemberAcc {
             seconds: 0,

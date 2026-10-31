@@ -1,7 +1,8 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte";
   import { api, openExternal, type ExportRow, type IssueStat, type Stats } from "../lib/api";
-  import { formatDate, formatHours, formatPercent, formatTime } from "../lib/format";
+  import { formatHours, formatPercent, formatShortDate, formatTime } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
   import Icon from "../components/Icon.svelte";
 
   let stats = $state<Stats | null>(null);
@@ -97,7 +98,7 @@
       if (group === "epic") {
         key = i.epicKey ?? "";
         const epic = stats?.byIssue.find((x) => x.key === key);
-        label = key ? `${key}${epic?.summary ? ` · ${epic.summary}` : ""}` : "Ohne Epic";
+        label = key ? `${key}${epic?.summary ? ` · ${epic.summary}` : ""}` : t("tickets.noEpic");
         color = i.color;
       } else if (group === "project") {
         key = i.projectKey;
@@ -105,8 +106,8 @@
         label = `${key}${p?.label && p.label !== key ? ` · ${p.label}` : ""}`;
         color = p?.color ?? i.color;
       } else {
-        key = i.issueType || "Unbekannt";
-        label = key;
+        key = i.issueType || "?";
+        label = i.issueType || t("common.unknown");
       }
       const g = map.get(key) ?? { key, label, color, seconds: 0, issues: [] };
       g.seconds += i.seconds;
@@ -146,19 +147,19 @@
 
 <div class="view">
   <div class="view-header">
-    <h1>Tickets</h1>
+    <h1>{t("tickets.title")}</h1>
     <div class="search row">
       <Icon name="search" size={15} />
-      <input type="search" placeholder="Ticket, Titel oder Epic …" bind:value={search} />
+      <input type="search" placeholder={t("tickets.search")} bind:value={search} />
     </div>
-    <select bind:value={project} title="Projekt">
-      <option value="">Alle Projekte</option>
+    <select bind:value={project} title={t("tickets.project")}>
+      <option value="">{t("tickets.allProjects")}</option>
       {#each projects as p (p.key)}
         <option value={p.key}>{p.key} · {p.label}</option>
       {/each}
     </select>
-    <select bind:value={issueType} title="Tickettyp">
-      <option value="">Alle Typen</option>
+    <select bind:value={issueType} title={t("tickets.type")}>
+      <option value="">{t("tickets.allTypes")}</option>
       {#each types as t (t)}
         <option value={t}>{t}</option>
       {/each}
@@ -166,35 +167,35 @@
     <label class="group-by">
       <Icon name="layers" size={14} />
       <select bind:value={group}>
-        <option value="none">Nicht gruppieren</option>
-        <option value="epic">Nach Epic</option>
-        <option value="project">Nach Projekt</option>
-        <option value="type">Nach Tickettyp</option>
+        <option value="none">{t("group.none")}</option>
+        <option value="epic">{t("group.epic")}</option>
+        <option value="project">{t("group.project")}</option>
+        <option value="type">{t("group.type")}</option>
       </select>
     </label>
     {#if loading}<span class="spin faint"><Icon name="refresh" size={14} /></span>{/if}
     <span class="grow"></span>
     {#if stats}
-      <span class="muted">{filtered.length} Tickets · <span class="mono">{formatHours(filteredTotal, tf)}</span></span>
+      <span class="muted">{t("tickets.count", { n: filtered.length })} · <span class="mono">{formatHours(filteredTotal, tf)}</span></span>
     {/if}
   </div>
   <div class="view-body">
     {#if !store.memberIds.length}
-      <p class="muted">Keine Mitglieder im Team. Lege sie unter Einstellungen → Team & Mitglieder an.</p>
+      <p class="muted">{t("member.noMembers")}</p>
     {:else if stats}
       <div class="card table-card">
         <table>
           <thead>
             <tr>
-              <th><button type="button" onclick={() => sortBy("key")}>Ticket</button></th>
-              <th>Titel</th>
-              <th>Typ</th>
-              <th><button type="button" onclick={() => sortBy("status")}>Status</button></th>
-              <th class="num"><button type="button" onclick={() => sortBy("seconds")}>Team</button></th>
-              <th class="num">Anteil</th>
-              <th class="members-col">Mitglieder</th>
-              <th class="num"><button type="button" onclick={() => sortBy("estimate")}>Schätzung</button></th>
-              <th class="num" title="Gesamt gebuchte Zeit laut Jira (alle Personen, gesamte Laufzeit)">Jira gesamt</th>
+              <th><button type="button" onclick={() => sortBy("key")}>{t("col.issue")}</button></th>
+              <th>{t("col.summary")}</th>
+              <th>{t("col.type")}</th>
+              <th><button type="button" onclick={() => sortBy("status")}>{t("col.status")}</button></th>
+              <th class="num"><button type="button" onclick={() => sortBy("seconds")}>{t("col.team")}</button></th>
+              <th class="num">{t("col.share")}</th>
+              <th class="members-col">{t("col.members")}</th>
+              <th class="num"><button type="button" onclick={() => sortBy("estimate")}>{t("col.estimate")}</button></th>
+              <th class="num" title={t("col.jiraTotalTitle")}>{t("col.jiraTotal")}</th>
               <th></th>
             </tr>
           </thead>
@@ -202,7 +203,7 @@
             {#each groups as g (g.key)}
               {#if group !== "none"}
                 <tr class="group-row">
-                  <td colspan="4"><span class="row"><span class="dot" style="background:{g.color ?? 'var(--text-3)'}"></span><strong>{g.label}</strong><span class="faint">{g.issues.length} Tickets</span></span></td>
+                  <td colspan="4"><span class="row"><span class="dot" style="background:{g.color ?? 'var(--text-3)'}"></span><strong>{g.label}</strong><span class="faint">{t("tickets.count", { n: g.issues.length })}</span></span></td>
                   <td class="num mono"><strong>{formatHours(g.seconds, tf)}</strong></td>
                   <td class="num mono muted">{formatPercent(g.seconds, filteredTotal)}</td>
                   <td colspan="4"></td>
@@ -226,16 +227,16 @@
                     </span>
                   </td>
                   <td class="num mono muted">{i.originalEstimateS != null ? formatHours(i.originalEstimateS, tf) : "–"}</td>
-                  <td class="num mono muted" title={i.timeSpentS != null ? `Team-Anteil im Zeitraum: ${formatPercent(i.seconds, i.timeSpentS)}` : ""}>{i.timeSpentS != null ? formatHours(i.timeSpentS, tf) : "–"}</td>
-                  <td class="actions"><button class="btn ghost sm icon" type="button" title="In Jira öffnen" onclick={(e) => { e.stopPropagation(); openIssue(i.key); }}><Icon name="external" size={14} /></button></td>
+                  <td class="num mono muted" title={i.timeSpentS != null ? t("tickets.teamShare", { p: formatPercent(i.seconds, i.timeSpentS) }) : ""}>{i.timeSpentS != null ? formatHours(i.timeSpentS, tf) : "–"}</td>
+                  <td class="actions"><button class="btn ghost sm icon" type="button" title={t("tickets.openInJira")} onclick={(e) => { e.stopPropagation(); openIssue(i.key); }}><Icon name="external" size={14} /></button></td>
                 </tr>
                 {#if open}
                   <tr class="detail-row">
                     <td colspan="10">
                       {#if detailLoading}
-                        <span class="faint">Lade …</span>
+                        <span class="faint">{t("common.loading")}</span>
                       {:else if !detail.length}
-                        <span class="faint">Keine Worklogs.</span>
+                        <span class="faint">{t("tickets.noWorklogs")}</span>
                       {:else}
                         <div class="detail">
                           <div class="member-list">
@@ -247,7 +248,7 @@
                             <tbody>
                               {#each detail as r (r.worklogIds.join(","))}
                                 <tr>
-                                  <td class="mono muted">{formatDate(r.date, { day: "2-digit", month: "2-digit", year: "numeric" })}</td>
+                                  <td class="mono muted">{formatShortDate(r.date)}</td>
                                   <td class="mono muted">{formatTime(r.started)}</td>
                                   <td><span class="row"><span class="dot" style="background:{store.memberColor(r.memberId)}"></span>{r.member}</span></td>
                                   <td class="comment muted ellipsis" title={r.comment}>{r.comment}</td>
@@ -264,13 +265,13 @@
               {/each}
             {/each}
             {#if !filtered.length}
-              <tr><td colspan="10" class="faint">Keine Tickets im Zeitraum.</td></tr>
+              <tr><td colspan="10" class="faint">{t("tickets.none")}</td></tr>
             {/if}
           </tbody>
         </table>
       </div>
     {:else}
-      <p class="faint">Lade …</p>
+      <p class="faint">{t("common.loading")}</p>
     {/if}
   </div>
 </div>

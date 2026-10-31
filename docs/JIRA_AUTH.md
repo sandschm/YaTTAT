@@ -1,65 +1,65 @@
-# Jira-Zugriff: Anmeldung und benötigte Rechte
+# Jira access: login and required permissions
 
-YaTTAT verwendet dieselbe Anmeldung wie [YaTTT](https://github.com/sandschm/YaTTT): Standard ist die
-**Browser-Anmeldung** in einem eigenen Fenster (SSO und zweiter Faktor funktionieren wie im Browser,
-die Session-Cookies werden übernommen und verschlüsselt gespeichert). Alternativ Benutzername und
-Passwort (Data Center ohne SSO), Personal Access Token (Data Center) oder E-Mail und API-Token
-(Cloud). Der Mechanismus ist in YaTTT gegen Jira Cloud mit SSO bestätigt; Details und Testprotokoll
-stehen dort unter `docs/JIRA_AUTH.md`.
+YaTTAT uses the same login as [YaTTT](https://github.com/sandschm/YaTTT): the default is the
+**browser login** in its own window (SSO and a second factor work as in the browser, the session
+cookies are taken over and stored encrypted). Alternatives: username and password (Data Center
+without SSO), personal access token (Data Center) or e-mail and API token (Cloud). The mechanism was
+confirmed in YaTTT against Jira Cloud with SSO; details and the test protocol are in YaTTT's
+`docs/JIRA_AUTH.md`.
 
-## Was YaTTAT liest
+## What YaTTAT reads
 
-| Zweck | Endpunkt |
+| Purpose | Endpoint |
 |---|---|
-| Sitzung prüfen, Deployment erkennen | `GET /rest/api/2/myself`, `GET /rest/api/2/serverInfo` |
-| Mitglieder suchen (Einstellungen → Team) | `GET /rest/api/2/user/search` (Cloud: `query`, Data Center: `username`) |
-| Projekte suchen | `GET /rest/api/2/project/search` (Cloud) bzw. `GET /rest/api/2/project` (DC) |
-| Tickets mit Worklogs der Mitglieder im Zeitraum | `GET /rest/api/2/search/jql` (Cloud) bzw. `GET /rest/api/2/search` (DC) mit `worklogAuthor in (…) AND worklogDate >= … AND worklogDate <= …` |
-| Worklogs je Ticket | `GET /rest/api/2/issue/{key}/worklog` (paginiert) |
+| Check the session, detect the deployment | `GET /rest/api/2/myself`, `GET /rest/api/2/serverInfo` |
+| Search members (Settings → Team) | `GET /rest/api/2/user/search` (Cloud: `query`, Data Center: `username`) |
+| Search projects | `GET /rest/api/2/project/search` (Cloud) or `GET /rest/api/2/project` (DC) |
+| Issues with worklogs of the members in the range | `GET /rest/api/2/search/jql` (Cloud) or `GET /rest/api/2/search` (DC) with `worklogAuthor in (…) AND worklogDate >= … AND worklogDate <= …` |
+| Worklogs per issue | `GET /rest/api/2/issue/{key}/worklog` (paginated) |
 
-YaTTAT schreibt nichts nach Jira.
+YaTTAT never writes to Jira. The signed-in person only sees worklogs on issues they may read in Jira;
+times on issues in projects without access are missing from the analysis.
 
-## Quelle Tempo Cloud
+## Source Tempo Cloud
 
-Bucht das Team in Tempo, legt Tempo die Jira-Worklogs je nach Konfiguration unter dem
-Tempo-App-Konto an. Die Jira-API meldet dann als Autor „Tempo Timesheets“ statt der Person, und
-`worklogAuthor` findet die Tickets nicht. YaTTAT zeigt das nach einem Abruf als „Worklogs anderer
-Autoren gefunden“ an. Abhilfe: Einstellungen → Verbindung → Quelle der Zeiten → **Tempo Cloud** mit
-einem Tempo-API-Token (Tempo → Einstellungen → API-Integration).
+If the team logs time in Tempo, Tempo creates the Jira worklogs under the Tempo app account,
+depending on the configuration. The Jira API then reports "Tempo Timesheets" as the author instead of
+the person, and `worklogAuthor` does not find the issues. YaTTAT reports this after a fetch as
+"Worklogs by other authors found". Remedy: Settings → Connection → Source of times → **Tempo Cloud**
+with a Tempo API token (Tempo → Settings → API integration).
 
-| Zweck | Endpunkt |
+| Purpose | Endpoint |
 |---|---|
-| Token prüfen | `GET https://api.tempo.io/4/worklogs/user/{eigene accountId}?limit=1` |
-| Worklogs je Mitglied im Zeitraum | `GET https://api.tempo.io/4/worklogs/user/{accountId}?from&to&offset&limit` (paginiert) |
-| Tickets zu den Worklogs | `GET /rest/api/2/issue/{id}` je Ticket-ID (Jira-Sitzung, 4 parallel) |
+| Check the token | `GET https://api.tempo.io/4/worklogs/user/{own accountId}?limit=1` |
+| Worklogs per member in the range | `GET https://api.tempo.io/4/worklogs/user/{accountId}?from&to&offset&limit` (paginated) |
+| Issues of the worklogs | `GET /rest/api/2/issue/{id}` per issue id (Jira session, 4 in parallel) |
 
-Das Token wird wie die Jira-Zugangsdaten verschlüsselt gespeichert und braucht in Tempo das Recht,
-die Worklogs der Mitglieder zu sehen (Team-Lead oder „View all worklogs“). Tempo-Worklogs auf Tickets,
-die die angemeldete Person in Jira nicht lesen darf, werden gezählt, aber nicht ausgewertet. Die angemeldete Person sieht nur Worklogs von Tickets, auf die sie
-in Jira Leserechte hat; Zeiten auf Tickets aus Projekten ohne Zugriff fehlen in der Auswertung.
+The token is stored encrypted like the Jira credentials and needs the Tempo permission to see the
+members' worklogs (team lead or "View all worklogs"). Tempo worklogs on issues the signed-in person
+may not read in Jira are counted but not analysed.
 
-## Benutzer-IDs
+## User ids
 
-- Jira Cloud identifiziert Personen über die `accountId`; E-Mail-Adressen sind je nach
-  Datenschutzeinstellung nicht sichtbar. Die Suche verlangt mindestens ein Zeichen.
-- Jira Data Center verwendet den Benutzernamen (`name`); eine leere Suche listet alle aktiven Benutzer.
+- Jira Cloud identifies people by `accountId`; e-mail addresses may be hidden depending on the
+  privacy settings. The search needs at least one character.
+- Jira Data Center uses the username (`name`); an empty search lists all active users.
 
-Die ID wird mit dem Mitglied gespeichert und für `worklogAuthor` sowie den Abgleich der
-Worklog-Autoren verwendet. Wird ein Benutzer in Jira umbenannt, bleibt die ID gleich.
+The id is stored with the member and used for `worklogAuthor` and for matching worklog authors. If a
+user is renamed in Jira, the id stays the same.
 
-## Speicherung der Zugangsdaten
+## Credential storage
 
-- Im Schlüsselbund des Betriebssystems (macOS Keychain, Windows Credential Manager, Linux Secret
-  Service) liegt nur ein zufälliger 32-Byte-Schlüssel (Service `de.yattat.app`).
-- Session-Cookies, Tokens und ggf. das Passwort liegen XChaCha20-Poly1305-verschlüsselt in
-  `secrets.enc` im Konfigurationsverzeichnis.
-- Ohne Schlüsselbund (z. B. Linux ohne Secret Service) liegt der Schlüssel in `secrets.key` mit
-  Rechten 0600; die Einstellungen zeigen dann einen Hinweis.
+- The operating system's keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+  only holds a random 32-byte key (service `de.yattat.app`).
+- Session cookies, tokens and, if used, the password are stored XChaCha20-Poly1305-encrypted in
+  `secrets.enc` in the configuration directory.
+- Without a keyring (e.g. Linux without a Secret Service) the key is kept in `secrets.key` with
+  permissions 0600; the settings then show a hint.
 
-## Grenzen
+## Limits
 
-- Cookie-Sitzungen laufen ab (Atlassian Guard kann kurze Sitzungen erzwingen); die App zeigt dann
-  „Erneut anmelden“.
-- Nach mehreren Fehlversuchen verlangt Jira ein CAPTCHA; die Passwort-Anmeldung meldet das.
-- Unternehmens-Proxys und interne Zertifikate: der Rust-Client nutzt den System-Zertifikatspeicher
-  und die Proxy-Umgebungsvariablen (`HTTPS_PROXY`).
+- Cookie sessions expire (Atlassian Guard can enforce short sessions); the app then shows "Sign in
+  again".
+- After several failed attempts Jira demands a CAPTCHA; the password login reports that.
+- Corporate proxies and internal certificates: the Rust client uses the system certificate store and
+  the proxy environment variables (`HTTPS_PROXY`).

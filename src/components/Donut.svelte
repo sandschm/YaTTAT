@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatHours, formatPercent } from "../lib/format";
   import { store } from "../lib/store.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   export interface Slice {
     key: string;
@@ -26,7 +27,7 @@
 
 {#if total > 0}
   <div class="donut-wrap">
-    <svg viewBox="0 0 120 120" class="donut" role="img" aria-label="Verteilung">
+    <svg viewBox="0 0 120 120" class="donut" role="img" aria-label={t("chart.distribution")}>
       {#each segments as seg (seg.key)}
         <circle cx="60" cy="60" r="46" fill="none" stroke={seg.color} stroke-width="16" stroke-dasharray={seg.dash} stroke-dashoffset={seg.offset} transform="rotate(-90 60 60)">
           <title>{seg.label}: {formatHours(seg.seconds, tf)} ({formatPercent(seg.seconds, total)})</title>
@@ -43,11 +44,11 @@
           <span class="mono muted">{formatHours(seg.seconds, tf)}</span>
         </li>
       {/each}
-      {#if segments.length > 10}<li class="faint">… und {segments.length - 10} weitere</li>{/if}
+      {#if segments.length > 10}<li class="faint">{t("chart.more", { n: segments.length - 10 })}</li>{/if}
     </ul>
   </div>
 {:else}
-  <p class="faint">Keine Zeiten im Zeitraum.</p>
+  <p class="faint">{t("chart.noTimes")}</p>
 {/if}
 
 <style>

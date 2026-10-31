@@ -1,7 +1,8 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte";
   import { api, type AppInfo, type AuthMethod, type JiraUser, type Member, type Project, type Settings, type SourceComparison, type Team } from "../lib/api";
-  import { formatDate, formatDateTime, formatHours, formatSigned } from "../lib/format";
+  import { formatDateTime, formatHours, formatShortDate, formatSigned, weekdayNames } from "../lib/format";
+  import { t, type Key } from "../lib/i18n.svelte";
   import Icon from "../components/Icon.svelte";
   import Avatar from "../components/Avatar.svelte";
 
@@ -9,12 +10,12 @@
   // Browser mock only: ?tab=team opens a settings tab directly (used for screenshots).
   const requestedTab = typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window) ? new URLSearchParams(location.search).get("tab") : null;
   let tab = $state<Tab>((["connection", "projects", "team", "display", "info"].includes(requestedTab ?? "") ? requestedTab : store.connected ? "team" : "connection") as Tab);
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "connection", label: "Verbindung" },
-    { id: "projects", label: "Projekte" },
-    { id: "team", label: "Team & Mitglieder" },
-    { id: "display", label: "Zeit & Darstellung" },
-    { id: "info", label: "Info" },
+  const tabs: { id: Tab; label: Key }[] = [
+    { id: "connection", label: "tab.connection" },
+    { id: "projects", label: "tab.projects" },
+    { id: "team", label: "tab.team" },
+    { id: "display", label: "tab.display" },
+    { id: "info", label: "tab.info" },
   ];
 
   // ---- draft handling: edits go to a local copy and are saved debounced
@@ -50,12 +51,19 @@
   let busy = $state(false);
   let authError = $state("");
   const auth = $derived(store.auth);
-  const methodHelp: Record<AuthMethod, string> = {
-    browserSession: "Öffnet die Jira-Anmeldeseite in einem eigenen Fenster. SSO und ein zweiter Faktor funktionieren wie im Browser. Es wird nur die Sitzung gespeichert, kein Passwort.",
-    password: "Für Jira Data Center ohne SSO. Benutzername und Passwort werden verschlüsselt lokal gespeichert.",
-    personalAccessToken: "Für Jira Data Center: Personal Access Token aus dem Profil (Profil → Persönliche Zugangstoken).",
-    apiToken: "Für Jira Cloud: E-Mail-Adresse und API-Token von id.atlassian.com.",
+  const methodHelp: Record<AuthMethod, Key> = {
+    browserSession: "conn.help.browserSession",
+    password: "conn.help.password",
+    personalAccessToken: "conn.help.personalAccessToken",
+    apiToken: "conn.help.apiToken",
   };
+  const methods: [AuthMethod, Key][] = [
+    ["browserSession", "conn.methodBrowser"],
+    ["password", "conn.methodPassword"],
+    ["personalAccessToken", "conn.methodPat"],
+    ["apiToken", "conn.methodApiToken"],
+  ];
+  const statusMethod: Record<string, Key> = { cookies: "status.methodCookies", basic: "status.methodBasic", bearer: "status.methodBearer", apiToken: "status.methodApiToken" };
 
   async function connect() {
     if (!draft) return;
@@ -81,7 +89,7 @@
           break;
       }
       store.auth = await api.getAuthStatus();
-      store.toast(`Angemeldet als ${store.auth.user?.displayName ?? "?"}`, "success");
+      store.toast(t("conn.signedInAs", { name: store.auth.user?.displayName ?? "?" }), "success");
       if (!store.members.length) tab = "team";
     } catch (e) {
       authError = String(e);
@@ -91,7 +99,7 @@
   }
 
   async function disconnect() {
-    if (!(await store.confirm("Abmelden", "Die gespeicherte Jira-Sitzung wird gelöscht. Die bereits geladenen Zeiten bleiben lokal erhalten.", "Abmelden"))) return;
+    if (!(await store.confirm(t("conn.signOut"), t("conn.signOutText"), t("conn.signOut")))) return;
     await api.logout();
     store.auth = await api.getAuthStatus();
   }
@@ -105,7 +113,7 @@
       await saveNow();
       store.settings = await api.setTempoCloudToken(clear ? null : tempoToken);
       tempoToken = "";
-      store.toast(clear ? "Tempo-Token entfernt" : "Tempo-Token geprüft und gespeichert", "success");
+      store.toast(t(clear ? "source.tokenRemoved" : "source.tokenSaved"), "success");
     } catch (e) {
       store.toast(String(e), "error");
     } finally {
@@ -138,10 +146,10 @@
   }
   const compareText = $derived.by(() => {
     const p = store.compareProgress;
-    if (!p) return "Lade …";
+    if (!p) return t("common.loading");
     const src = p.source === "jira" ? "Jira" : "Tempo";
-    if (p.phase === "issues") return p.total ? `${src}: Tickets ${p.done}/${p.total}` : `${src}: Tickets suchen …`;
-    return p.total ? `${src}: Worklogs ${p.done}/${p.total}` : `${src}: Worklogs …`;
+    if (p.phase === "issues") return p.total ? t("compare.progressIssues", { src, done: p.done, total: p.total }) : t("compare.progressIssuesSearch", { src });
+    return p.total ? t("compare.progressWorklogs", { src, done: p.done, total: p.total }) : t("compare.progressWorklogsPlain", { src });
   });
 
   // ---- projects
@@ -208,25 +216,25 @@
   }
   function addTeam() {
     if (!draft) return;
-    const team: Team = { id: newId("team"), name: `Team ${draft.teams.length + 1}`, members: [] };
+    const team: Team = { id: newId("team"), name: t("teams.newName", { n: draft.teams.length + 1 }), members: [] };
     draft.teams = [...draft.teams, team];
     selectedTeamId = team.id;
     change();
   }
-  async function removeTeam(t: Team) {
+  async function removeTeam(team: Team) {
     if (!draft) return;
-    if (!(await store.confirm("Team löschen", `Soll das Team „${t.name}“ mit ${t.members.length} Mitgliedern entfernt werden? Die geladenen Zeiten bleiben im lokalen Cache.`, "Löschen", true))) return;
-    draft.teams = draft.teams.filter((x) => x.id !== t.id);
+    if (!(await store.confirm(t("teams.delete"), t("teams.deleteText", { name: team.name, n: team.members.length }), t("common.delete"), true))) return;
+    draft.teams = draft.teams.filter((x) => x.id !== team.id);
     selectedTeamId = draft.teams[0]?.id ?? null;
-    if (store.teamId === t.id) store.teamId = selectedTeamId;
+    if (store.teamId === team.id) store.teamId = selectedTeamId;
     change(true);
   }
-  function renameTeam(t: Team, name: string) {
-    t.name = name;
+  function renameTeam(team: Team, name: string) {
+    team.name = name;
     change();
   }
-  function selectTeam(t: Team) {
-    selectedTeamId = t.id;
+  function selectTeam(team: Team) {
+    selectedTeamId = team.id;
     userResults = [];
     userQuery = "";
     userSearchDone = false;
@@ -252,7 +260,7 @@
   }
   async function removeMember(m: Member) {
     if (!selectedTeam) return;
-    if (!(await store.confirm("Mitglied entfernen", `${m.displayName} aus „${selectedTeam.name}“ entfernen?`, "Entfernen", true))) return;
+    if (!(await store.confirm(t("teams.removeMemberTitle"), t("teams.removeMemberText", { name: m.displayName, team: selectedTeam.name }), t("common.remove"), true))) return;
     selectedTeam.members = selectedTeam.members.filter((x) => x.id !== m.id);
     change(true);
   }
@@ -263,7 +271,7 @@
   }
   function setMemberColor(m: Member, color: string) {
     // same member, same color in every team
-    for (const t of draft?.teams ?? []) for (const x of t.members) if (x.id === m.id) x.color = color;
+    for (const team of draft?.teams ?? []) for (const x of team.members) if (x.id === m.id) x.color = color;
     change();
   }
   function onUserQuery() {
@@ -292,11 +300,11 @@
     if (tab === "info") api.getAppInfo().then((i) => (info = i)).catch(() => {});
   });
   async function clearCache() {
-    if (!(await store.confirm("Cache leeren", "Alle lokal gespeicherten Tickets und Worklogs werden gelöscht und beim nächsten Anzeigen neu aus Jira geladen.", "Cache leeren", true))) return;
+    if (!(await store.confirm(t("cache.clear"), t("cache.clearText"), t("cache.clear"), true))) return;
     try {
       const cache = await api.clearCache();
       if (info) info = { ...info, cache };
-      store.toast("Cache geleert", "success");
+      store.toast(t("cache.cleared"), "success");
     } catch (e) {
       store.toast(String(e), "error");
     }
@@ -306,67 +314,67 @@
     return `${(n / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
   }
 
-  const weekdays = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+  const weekdays = $derived(weekdayNames());
 </script>
 
 <div class="view">
   <div class="view-header">
-    <h1>Einstellungen</h1>
+    <h1>{t("settings.title")}</h1>
     <div class="grow"></div>
-    {#if dirty}<span class="faint">Speichere …</span>{/if}
+    {#if dirty}<span class="faint">{t("settings.saving")}</span>{/if}
   </div>
   <div class="layout">
     <nav class="tabs">
-      {#each tabs as t (t.id)}
-        <button class:on={tab === t.id} type="button" onclick={() => (tab = t.id)}>{t.label}</button>
+      {#each tabs as item (item.id)}
+        <button class:on={tab === item.id} type="button" onclick={() => (tab = item.id)}>{t(item.label)}</button>
       {/each}
     </nav>
     <div class="pane">
       {#if !draft}
-        <p class="faint">Lade …</p>
+        <p class="faint">{t("common.loading")}</p>
       {:else if tab === "connection"}
         <section class="card block">
-          <h3>Jira-Verbindung</h3>
+          <h3>{t("conn.title")}</h3>
           <div class="field">
-            <label for="jira-url">Jira-URL</label>
-            <input id="jira-url" type="url" placeholder="https://jira.firma.de oder https://firma.atlassian.net" bind:value={draft.jira.baseUrl} oninput={() => change()} />
-            <span class="hint">Jira Cloud: nur die Domain, z. B. https://firma.atlassian.net (ohne /jira). Data Center ggf. mit Kontextpfad, z. B. https://tools.firma.de/jira. Eingefügte Ticket- oder Board-Links werden automatisch gekürzt.</span>
+            <label for="jira-url">{t("conn.url")}</label>
+            <input id="jira-url" type="url" placeholder={t("conn.urlPlaceholder")} bind:value={draft.jira.baseUrl} oninput={() => change()} />
+            <span class="hint">{t("conn.urlHint")}</span>
           </div>
           <div class="field">
-            <span class="label-text">Anmeldeart</span>
-            {#each [["browserSession", "Browser-Anmeldung (SSO, 2FA)"], ["password", "Benutzername und Passwort"], ["personalAccessToken", "Personal Access Token (Data Center)"], ["apiToken", "E-Mail und API-Token (Cloud)"]] as [id, label] (id)}
+            <span class="label-text">{t("conn.method")}</span>
+            {#each methods as [id, label] (id)}
               <label class="radio">
                 <input type="radio" name="auth" value={id} bind:group={draft.jira.authMethod} onchange={() => change()} />
-                <span>{label}</span>
+                <span>{t(label)}</span>
               </label>
             {/each}
-            <span class="hint">{methodHelp[draft.jira.authMethod]}</span>
+            <span class="hint">{t(methodHelp[draft.jira.authMethod])}</span>
           </div>
           {#if draft.jira.authMethod === "password"}
             <div class="two">
-              <div class="field"><label for="u">Benutzername</label><input id="u" type="text" bind:value={username} autocomplete="username" /></div>
-              <div class="field"><label for="p">Passwort</label><input id="p" type="password" bind:value={password} autocomplete="current-password" onkeydown={(e) => e.key === "Enter" && connect()} /></div>
+              <div class="field"><label for="u">{t("conn.username")}</label><input id="u" type="text" bind:value={username} autocomplete="username" /></div>
+              <div class="field"><label for="p">{t("conn.password")}</label><input id="p" type="password" bind:value={password} autocomplete="current-password" onkeydown={(e) => e.key === "Enter" && connect()} /></div>
             </div>
           {:else if draft.jira.authMethod === "personalAccessToken"}
-            <div class="field"><label for="t">Personal Access Token</label><input id="t" type="password" bind:value={token} onkeydown={(e) => e.key === "Enter" && connect()} /></div>
+            <div class="field"><label for="t">{t("conn.pat")}</label><input id="t" type="password" bind:value={token} onkeydown={(e) => e.key === "Enter" && connect()} /></div>
           {:else if draft.jira.authMethod === "apiToken"}
             <div class="two">
-              <div class="field"><label for="e">E-Mail</label><input id="e" type="email" bind:value={email} /></div>
-              <div class="field"><label for="t2">API-Token</label><input id="t2" type="password" bind:value={token} onkeydown={(e) => e.key === "Enter" && connect()} /></div>
+              <div class="field"><label for="e">{t("conn.email")}</label><input id="e" type="email" bind:value={email} /></div>
+              <div class="field"><label for="t2">{t("conn.apiToken")}</label><input id="t2" type="password" bind:value={token} onkeydown={(e) => e.key === "Enter" && connect()} /></div>
             </div>
           {/if}
           {#if authError}<div class="error"><Icon name="warning" size={14} /> {authError}</div>{/if}
           <div class="row wrap">
             <button class="btn primary" type="button" onclick={connect} disabled={busy || !draft.jira.baseUrl}>
               {#if busy}<span class="spin"><Icon name="refresh" size={14} /></span>{/if}
-              {auth.authenticated ? "Erneut anmelden" : "Anmelden"}
+              {t(auth.authenticated ? "conn.signInAgain" : "conn.signIn")}
             </button>
             {#if store.loginWindowOpen}
-              <button class="btn" type="button" onclick={() => api.cancelBrowserLogin()}>Anmeldefenster schließen</button>
-              <span class="faint">Bitte im geöffneten Fenster bei Jira anmelden …</span>
+              <button class="btn" type="button" onclick={() => api.cancelBrowserLogin()}>{t("conn.closeLoginWindow")}</button>
+              <span class="faint">{t("conn.loginInWindow")}</span>
             {/if}
             {#if auth.authenticated && !busy}
-              <button class="btn" type="button" onclick={disconnect}>Abmelden</button>
+              <button class="btn" type="button" onclick={disconnect}>{t("conn.signOut")}</button>
             {/if}
           </div>
           {#if store.loginWindowOpen && store.loginProgress}
@@ -374,73 +382,70 @@
           {/if}
         </section>
         <section class="card block status">
-          <h3>Status</h3>
+          <h3>{t("status.title")}</h3>
           {#if auth.authenticated && auth.user}
             <div class="row"><span class="dot" style="background: var(--success)"></span><strong>{auth.user.displayName}</strong><span class="muted">{auth.user.email ?? ""}</span></div>
             {#if auth.server}
-              <div class="muted">{auth.server.serverTitle ?? auth.server.baseUrl} · Jira {auth.server.deployment === "cloud" ? "Cloud" : "Data Center"} {auth.server.version}</div>
+              <div class="muted">{auth.server.serverTitle ?? auth.server.baseUrl} · Jira {t(auth.server.deployment === "cloud" ? "status.cloud" : "status.dataCenter")} {auth.server.version}</div>
             {/if}
-            <div class="muted">Anmeldung über {auth.method === "cookies" ? "Browser-Sitzung" : auth.method === "basic" ? "Benutzername/Passwort" : auth.method === "bearer" ? "Personal Access Token" : "API-Token"}</div>
+            <div class="muted">{t("status.via", { method: t(statusMethod[auth.method ?? ""] ?? "status.methodApiToken") })}</div>
           {:else}
-            <div class="row"><span class="dot" style="background: var(--warning)"></span><span>Nicht angemeldet</span></div>
+            <div class="row"><span class="dot" style="background: var(--warning)"></span><span>{t("status.notSignedIn")}</span></div>
             {#if auth.message}<div class="muted">{auth.message}</div>{/if}
           {/if}
         </section>
         <section class="card block">
-          <h3>Quelle der Zeiten</h3>
-          {#each [["jiraWorklogs", "Jira-Worklogs", "Standard. Liest die Worklogs über die Jira-API. Passt, wenn das Team direkt in Jira (oder mit YaTTT als Jira-Worklog) bucht."], ["tempoCloud", "Tempo Cloud", "Liest die Worklogs über die Tempo-API mit einem Tempo-API-Token. Nötig, wenn das Team in Tempo bucht: Jira führt diese Worklogs oft unter dem Tempo-App-Konto, sodass die Jira-API sie keiner Person zuordnet. Das Token braucht in Tempo die Berechtigung, die Worklogs der Mitglieder zu sehen (z. B. als Team-Lead)."]] as [id, label, help] (id)}
+          <h3>{t("source.title")}</h3>
+          {#each [["jiraWorklogs", "source.jira", "source.jiraHelp"], ["tempoCloud", "source.tempo", "source.tempoHelp"]] as [id, label, help] (id)}
             <label class="radio block-radio">
               <input type="radio" name="source" value={id} bind:group={draft.tempo.source} onchange={() => change(true)} />
-              <span><strong>{label}</strong><span class="hint">{help}</span></span>
+              <span><strong>{t(label as Key)}</strong><span class="hint">{t(help as Key)}</span></span>
             </label>
           {/each}
-          <p class="hint">Beim Wechsel der Quelle wird der lokale Cache geleert und der angezeigte Zeitraum neu geladen.</p>
+          <p class="hint">{t("source.switchHint")}</p>
           {#if draft.tempo.source === "tempoCloud"}
             <div class="field">
-              <label for="tbase">Tempo-API-Basis</label>
+              <label for="tbase">{t("source.apiBase")}</label>
               <input id="tbase" type="url" bind:value={draft.tempo.cloudApiBase} oninput={() => change()} />
             </div>
             <div class="field">
-              <label for="ttoken">Tempo-API-Token {draft.tempo.cloudTokenSet ? "(gespeichert)" : ""}</label>
+              <label for="ttoken">{t("source.token")} {draft.tempo.cloudTokenSet ? t("source.tokenStored") : ""}</label>
               <div class="row">
-                <input id="ttoken" type="password" bind:value={tempoToken} placeholder={draft.tempo.cloudTokenSet ? "••••••••" : "Token einfügen"} onkeydown={(e) => e.key === "Enter" && tempoToken && saveTempoToken(false)} />
-                <button class="btn primary" type="button" onclick={() => saveTempoToken(false)} disabled={tempoBusy || !tempoToken}>Prüfen & speichern</button>
-                {#if draft.tempo.cloudTokenSet}<button class="btn danger" type="button" onclick={() => saveTempoToken(true)} disabled={tempoBusy}>Entfernen</button>{/if}
+                <input id="ttoken" type="password" bind:value={tempoToken} placeholder={draft.tempo.cloudTokenSet ? "••••••••" : t("source.tokenPlaceholder")} onkeydown={(e) => e.key === "Enter" && tempoToken && saveTempoToken(false)} />
+                <button class="btn primary" type="button" onclick={() => saveTempoToken(false)} disabled={tempoBusy || !tempoToken}>{t("source.checkSave")}</button>
+                {#if draft.tempo.cloudTokenSet}<button class="btn danger" type="button" onclick={() => saveTempoToken(true)} disabled={tempoBusy}>{t("common.remove")}</button>{/if}
               </div>
-              <span class="hint">Tempo → Einstellungen → API-Integration → neues Token. Das Token wird wie die Jira-Zugangsdaten verschlüsselt gespeichert.</span>
+              <span class="hint">{t("source.tokenHint")}</span>
             </div>
           {:else if lastOutcome && lastOutcome.fetched && lastOutcome.source === "jira" && otherAuthorsTotal > 0 && missingNames.length}
-            <div class="error"><Icon name="warning" size={14} /> Beim letzten Abruf hatten {missingNames.join(", ")} keine Zeiten, obwohl Jira {otherAuthorsTotal} Worklogs anderer Autoren führt ({lastOutcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ")}). Bucht das Team in Tempo? Dann oben „Tempo Cloud“ wählen.</div>
+            <div class="error"><Icon name="warning" size={14} /> {t("source.jiraWarning", { names: missingNames.join(", "), n: otherAuthorsTotal, authors: lastOutcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ") })}</div>
           {/if}
           {#if draft.tempo.source === "tempoCloud" && lastOutcome && lastOutcome.fetched && lastOutcome.source === "tempoCloud" && missingNames.length}
-            <p class="hint">Beim letzten Abruf ohne Zeiten: {missingNames.join(", ")}. Haben diese Personen gebucht, darf das Token ihre Worklogs in Tempo vermutlich nicht sehen (Team-Lead-Rolle oder „View all worklogs“).</p>
+            <p class="hint">{t("source.tempoMissing", { names: missingNames.join(", ") })}</p>
           {/if}
         </section>
         <section class="card block">
-          <h3>Quellen-Abgleich</h3>
-          <p class="hint">
-            Liest den angezeigten Zeitraum ({formatDate(store.range.from, { day: "2-digit", month: "2-digit", year: "numeric" })} – {formatDate(store.range.to, { day: "2-digit", month: "2-digit", year: "numeric" })}) für
-            {store.team?.name ?? "das Team"} aus Jira und aus Tempo und vergleicht beide je Mitglied und Tag. Der Cache bleibt unverändert. Benötigt ein Tempo-API-Token.
-          </p>
+          <h3>{t("compare.title")}</h3>
+          <p class="hint">{t("compare.hint", { from: formatShortDate(store.range.from), to: formatShortDate(store.range.to), team: store.team?.name ?? t("compare.theTeam") })}</p>
           <div class="row wrap">
             <button class="btn" type="button" onclick={runCompare} disabled={comparing || !store.connected || !draft.tempo.cloudTokenSet || !store.memberIds.length}>
-              {#if comparing}<span class="spin"><Icon name="refresh" size={14} /></span>{:else}<Icon name="layers" size={14} />{/if} Abgleich starten
+              {#if comparing}<span class="spin"><Icon name="refresh" size={14} /></span>{:else}<Icon name="layers" size={14} />{/if} {t("compare.start")}
             </button>
             {#if comparing}<span class="faint">{compareText}</span>{/if}
-            {#if !draft.tempo.cloudTokenSet}<span class="faint">Zuerst oben ein Tempo-API-Token speichern.</span>{/if}
+            {#if !draft.tempo.cloudTokenSet}<span class="faint">{t("compare.needToken")}</span>{/if}
           </div>
           {#if compareError}<div class="error"><Icon name="warning" size={14} /> {compareError}</div>{/if}
           {#if comparison}
             {@const diff = comparison.tempoSeconds - comparison.jiraSeconds}
             <p class="compare-summary">
-              Jira <span class="mono">{formatHours(comparison.jiraSeconds, tf)}</span> auf {comparison.jiraIssues} Tickets ·
-              Tempo <span class="mono">{formatHours(comparison.tempoSeconds, tf)}</span> auf {comparison.tempoIssues} Tickets ·
-              Differenz <span class="mono" class:pos={diff === 0} class:neg={diff !== 0}>{formatSigned(diff, tf)}</span>
-              {#if diff === 0}<span class="badge success">identisch</span>{/if}
+              Jira <span class="mono">{formatHours(comparison.jiraSeconds, tf)}</span> {t("compare.onIssues", { n: comparison.jiraIssues })} ·
+              Tempo <span class="mono">{formatHours(comparison.tempoSeconds, tf)}</span> {t("compare.onIssues", { n: comparison.tempoIssues })} ·
+              {t("compare.diff")} <span class="mono" class:pos={diff === 0} class:neg={diff !== 0}>{formatSigned(diff, tf)}</span>
+              {#if diff === 0}<span class="badge success">{t("compare.identical")}</span>{/if}
             </p>
             <table class="compare">
               <thead>
-                <tr><th>Mitglied</th><th class="num">Jira</th><th class="num">Tempo</th><th class="num">Differenz</th><th class="num">Tage mit Abweichung</th></tr>
+                <tr><th>{t("col.member")}</th><th class="num">Jira</th><th class="num">Tempo</th><th class="num">{t("compare.diff")}</th><th class="num">{t("compare.colDiffDays")}</th></tr>
               </thead>
               <tbody>
                 {#each comparison.members as m (m.id)}
@@ -457,7 +462,7 @@
                       <td colspan="5">
                         <ul class="diff-days">
                           {#each m.differingDays as day (day.date)}
-                            <li><span class="mono">{formatDate(day.date, { weekday: "short", day: "2-digit", month: "2-digit" })}</span> Jira <span class="mono">{formatHours(day.jiraSeconds, tf)}</span> · Tempo <span class="mono">{formatHours(day.tempoSeconds, tf)}</span></li>
+                            <li><span class="mono">{formatShortDate(day.date)}</span> Jira <span class="mono">{formatHours(day.jiraSeconds, tf)}</span> · Tempo <span class="mono">{formatHours(day.tempoSeconds, tf)}</span></li>
                           {/each}
                         </ul>
                       </td>
@@ -467,43 +472,38 @@
               </tbody>
             </table>
             {#if comparison.jiraOtherAuthors.length}
-              <p class="hint">Jira führt im Zeitraum zusätzlich Worklogs unter: {comparison.jiraOtherAuthors.map((o) => `${o.name || o.id} (${o.count})`).join(", ")}.</p>
+              <p class="hint">{t("compare.otherAuthors", { authors: comparison.jiraOtherAuthors.map((o) => `${o.name || o.id} (${o.count})`).join(", ") })}</p>
             {/if}
             {#if comparison.tempoUnresolvedIssues}
-              <p class="hint">{comparison.tempoUnresolvedIssues} Tempo-Worklogs liegen auf Tickets, die in Jira nicht lesbar sind, und fehlen in beiden Summen.</p>
+              <p class="hint">{t("compare.unresolved", { n: comparison.tempoUnresolvedIssues })}</p>
             {/if}
-            <p class="hint">
-              Ist Tempo höher, bucht das Team in Tempo und Jira ordnet die Worklogs anderen Autoren zu: Quelle „Tempo Cloud“ wählen. Ist Jira höher, wurden Zeiten direkt in Jira gebucht, die Tempo erst mit dem nächtlichen Abgleich übernimmt, oder das Token sieht nicht alle Mitglieder.
-            </p>
+            <p class="hint">{t("compare.interpretation")}</p>
           {/if}
         </section>
       {:else if tab === "projects"}
         <section class="card block">
-          <h3>Projekte</h3>
-          <p class="hint">
-            Optional: Nur Zeiten auf Tickets dieser Projekte werden geladen und ausgewertet. Ohne Auswahl zählen alle Projekte,
-            auf die die Teammitglieder Zeiten gebucht haben.
-          </p>
+          <h3>{t("projects.title")}</h3>
+          <p class="hint">{t("projects.hint")}</p>
           {#if selectedProjects.length}
             <div class="chips">
               {#each selectedProjects as p (p.key)}
                 <span class="chip">
-                  <input type="color" value={store.projectColor(p.key)} onchange={(e) => setColor(p.key, (e.target as HTMLInputElement).value)} title="Farbe" />
+                  <input type="color" value={store.projectColor(p.key)} onchange={(e) => setColor(p.key, (e.target as HTMLInputElement).value)} title={t("common.color")} />
                   <span class="mono">{p.key}</span>
                   <span class="ellipsis">{p.name}</span>
-                  <button type="button" onclick={() => toggleProject(p)} aria-label="Entfernen"><Icon name="x" size={12} /></button>
+                  <button type="button" onclick={() => toggleProject(p)} aria-label={t("common.remove")}><Icon name="x" size={12} /></button>
                 </span>
               {/each}
             </div>
           {:else}
-            <p class="muted">Keine Einschränkung: alle Projekte.</p>
+            <p class="muted">{t("projects.noRestriction")}</p>
           {/if}
           {#if !store.connected}
-            <p class="muted">Zum Suchen zuerst mit Jira verbinden.</p>
+            <p class="muted">{t("projects.connectFirst")}</p>
           {:else}
             <div class="search row">
               <Icon name="search" size={15} />
-              <input type="search" placeholder="Projekte suchen (Key oder Name) …" bind:value={projectQuery} oninput={onProjectQuery} />
+              <input type="search" placeholder={t("projects.searchPlaceholder")} bind:value={projectQuery} oninput={onProjectQuery} />
               {#if projectsLoading}<span class="spin"><Icon name="refresh" size={14} /></span>{/if}
             </div>
             <ul class="list">
@@ -516,41 +516,41 @@
                   </label>
                 </li>
               {/each}
-              {#if !projectResults.length && !projectsLoading}<li class="faint">Keine Projekte gefunden.</li>{/if}
+              {#if !projectResults.length && !projectsLoading}<li class="faint">{t("projects.none")}</li>{/if}
             </ul>
           {/if}
         </section>
       {:else if tab === "team"}
         <div class="teams-layout">
           <section class="card block team-list">
-            <h3>Teams</h3>
+            <h3>{t("teams.title")}</h3>
             <ul class="team-items">
-              {#each draft.teams as t (t.id)}
+              {#each draft.teams as team (team.id)}
                 <li>
-                  <button type="button" class:on={selectedTeam?.id === t.id} onclick={() => selectTeam(t)}>
-                    <span class="ellipsis grow">{t.name}</span>
-                    <span class="badge">{t.members.length}</span>
+                  <button type="button" class:on={selectedTeam?.id === team.id} onclick={() => selectTeam(team)}>
+                    <span class="ellipsis grow">{team.name}</span>
+                    <span class="badge">{team.members.length}</span>
                   </button>
                 </li>
               {/each}
             </ul>
-            <button class="btn sm" type="button" onclick={addTeam}><Icon name="plus" size={14} /> Team anlegen</button>
+            <button class="btn sm" type="button" onclick={addTeam}><Icon name="plus" size={14} /> {t("teams.add")}</button>
           </section>
           {#if selectedTeam}
             <section class="card block team-detail">
               <div class="row head">
-                <input class="team-name" type="text" value={selectedTeam.name} oninput={(e) => renameTeam(selectedTeam!, (e.target as HTMLInputElement).value)} placeholder="Teamname" aria-label="Teamname" />
+                <input class="team-name" type="text" value={selectedTeam.name} oninput={(e) => renameTeam(selectedTeam!, (e.target as HTMLInputElement).value)} placeholder={t("teams.name")} aria-label={t("teams.name")} />
                 <span class="grow"></span>
-                <button class="btn danger sm" type="button" onclick={() => removeTeam(selectedTeam!)}><Icon name="trash" size={14} /> Team löschen</button>
+                <button class="btn danger sm" type="button" onclick={() => removeTeam(selectedTeam!)}><Icon name="trash" size={14} /> {t("teams.delete")}</button>
               </div>
-              <h3>Mitglieder</h3>
+              <h3>{t("teams.members")}</h3>
               {#if selectedTeam.members.length}
                 <table class="members">
                   <thead>
                     <tr>
-                      <th>Mitglied</th>
-                      <th class="num" title="Vertragliche Wochenstunden für das Soll; leer = Vollzeit-Muster aus „Zeit & Darstellung“">Std./Woche</th>
-                      <th>Farbe</th>
+                      <th>{t("col.member")}</th>
+                      <th class="num" title={t("teams.colHoursTitle")}>{t("teams.colHours")}</th>
+                      <th>{t("common.color")}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -566,27 +566,27 @@
                         <td class="num">
                           <input class="hours" type="number" min="0" max="80" step="0.5" value={m.weeklyHours ?? ""} placeholder={String(patternHours)} onchange={(e) => setWeeklyHours(m, (e.target as HTMLInputElement).value)} />
                         </td>
-                        <td><input type="color" value={m.color ?? "#64748b"} onchange={(e) => setMemberColor(m, (e.target as HTMLInputElement).value)} title="Farbe in Diagrammen" /></td>
-                        <td class="num"><button class="btn ghost sm icon" type="button" title="Aus dem Team entfernen" onclick={() => removeMember(m)}><Icon name="x" size={14} /></button></td>
+                        <td><input type="color" value={m.color ?? "#64748b"} onchange={(e) => setMemberColor(m, (e.target as HTMLInputElement).value)} title={t("teams.colorTitle")} /></td>
+                        <td class="num"><button class="btn ghost sm icon" type="button" title={t("teams.removeMember")} onclick={() => removeMember(m)}><Icon name="x" size={14} /></button></td>
                       </tr>
                     {/each}
                   </tbody>
                 </table>
               {:else}
-                <p class="muted">Noch keine Mitglieder. Füge unten Jira-Benutzer hinzu.</p>
+                <p class="muted">{t("teams.noMembers")}</p>
               {/if}
-              <h3 class="add-title">Mitglied hinzufügen</h3>
+              <h3 class="add-title">{t("teams.addMember")}</h3>
               {#if !store.connected}
-                <p class="muted">Zum Suchen von Jira-Benutzern zuerst mit Jira verbinden.</p>
+                <p class="muted">{t("teams.connectFirst")}</p>
               {:else}
                 <div class="row wrap">
                   <div class="search row grow">
                     <Icon name="search" size={15} />
-                    <input type="search" placeholder={auth.server?.deployment === "cloud" ? "Name oder E-Mail eingeben …" : "Name, Benutzername oder E-Mail (leer = alle) …"} bind:value={userQuery} oninput={onUserQuery} onfocus={() => !userSearchDone && searchUsers()} />
+                    <input type="search" placeholder={t(auth.server?.deployment === "cloud" ? "teams.searchCloud" : "teams.searchDc")} bind:value={userQuery} oninput={onUserQuery} onfocus={() => !userSearchDone && searchUsers()} />
                     {#if usersLoading}<span class="spin"><Icon name="refresh" size={14} /></span>{/if}
                   </div>
                   {#if auth.user && !memberInTeam(auth.user.id)}
-                    <button class="btn sm" type="button" onclick={addMe}><Icon name="user" size={14} /> Mich hinzufügen</button>
+                    <button class="btn sm" type="button" onclick={addMe}><Icon name="user" size={14} /> {t("teams.addMe")}</button>
                   {/if}
                 </div>
                 <ul class="list">
@@ -601,25 +601,22 @@
                     </li>
                   {/each}
                   {#if userSearchDone && !usersLoading && !userResults.filter((u) => !memberInTeam(u.id)).length}
-                    <li class="faint">{userQuery.trim() ? "Keine passenden Benutzer gefunden." : "Bitte einen Namen eingeben."}</li>
+                    <li class="faint">{t(userQuery.trim() ? "teams.noUsers" : "teams.typeName")}</li>
                   {/if}
                 </ul>
               {/if}
-              <p class="hint">
-                Die Zeiten werden über den Jira-Benutzer abgerufen (Cloud: Account-ID, Data Center: Benutzername). Ein Mitglied kann in
-                mehreren Teams sein; Farbe und Wochenstunden gelten dann überall.
-              </p>
+              <p class="hint">{t("teams.idHint")}</p>
             </section>
           {:else}
             <section class="card block team-detail">
-              <p class="muted">Lege ein Team an, um Mitglieder hinzuzufügen.</p>
+              <p class="muted">{t("teams.noTeam")}</p>
             </section>
           {/if}
         </div>
       {:else if tab === "display"}
         <section class="card block">
-          <h3>Soll-Arbeitszeit (Vollzeit)</h3>
-          <p class="hint">Stunden pro Wochentag für ein Vollzeit-Mitglied. Mitglieder mit eingetragenen Wochenstunden werden anteilig skaliert.</p>
+          <h3>{t("display.targetTitle")}</h3>
+          <p class="hint">{t("display.targetHint")}</p>
           <div class="weekdays">
             {#each weekdays as wd, i (wd)}
               <div class="field">
@@ -628,40 +625,48 @@
               </div>
             {/each}
           </div>
-          <label class="check"><input type="checkbox" bind:checked={draft.work.showTargets} onchange={() => change()} /><span>Soll und Saldo in den Auswertungen anzeigen</span></label>
+          <label class="check"><input type="checkbox" bind:checked={draft.work.showTargets} onchange={() => change()} /><span>{t("display.showTargets")}</span></label>
         </section>
         <section class="card block">
-          <h3>Darstellung</h3>
+          <h3>{t("display.title")}</h3>
           <div class="two">
             <div class="field">
-              <label for="fdow">Wochenbeginn</label>
-              <select id="fdow" bind:value={draft.work.firstDayOfWeek} onchange={() => change()}>
-                <option value={0}>Montag</option>
-                <option value={6}>Sonntag</option>
+              <label for="language">{t("display.language")}</label>
+              <select id="language" bind:value={draft.behavior.language} onchange={() => change(true)}>
+                <option value="system">{t("lang.system")}</option>
+                <option value="de">{t("lang.de")}</option>
+                <option value="en">{t("lang.en")}</option>
               </select>
             </div>
             <div class="field">
-              <label for="tfmt">Zeitformat</label>
-              <select id="tfmt" bind:value={draft.work.timeFormat} onchange={() => change()}>
-                <option value="hoursMinutes">Stunden:Minuten (1:30)</option>
-                <option value="decimal">Dezimal (1,50)</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="theme">Erscheinungsbild</label>
+              <label for="theme">{t("display.theme")}</label>
               <select id="theme" bind:value={draft.behavior.theme} onchange={() => change()}>
-                <option value="system">System</option>
-                <option value="light">Hell</option>
-                <option value="dark">Dunkel</option>
+                <option value="system">{t("theme.system")}</option>
+                <option value="light">{t("theme.light")}</option>
+                <option value="dark">{t("theme.dark")}</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="fdow">{t("display.firstDay")}</label>
+              <select id="fdow" bind:value={draft.work.firstDayOfWeek} onchange={() => change()}>
+                <option value={0}>{t("display.monday")}</option>
+                <option value={6}>{t("display.sunday")}</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="tfmt">{t("display.timeFormat")}</label>
+              <select id="tfmt" bind:value={draft.work.timeFormat} onchange={() => change()}>
+                <option value="hoursMinutes">{t("display.hoursMinutes")}</option>
+                <option value="decimal">{t("display.decimal")}</option>
               </select>
             </div>
           </div>
         </section>
         <section class="card block">
-          <h3>Aktualisierung</h3>
-          <label class="check"><input type="checkbox" bind:checked={draft.refresh.auto} onchange={() => change()} /><span>Angezeigten Zeitraum automatisch neu aus Jira laden <span class="hint">Nachträglich gebuchte oder geänderte Zeiten werden so übernommen. „Aktualisieren“ in der Kopfzeile lädt jederzeit sofort.</span></span></label>
+          <h3>{t("refresh.title")}</h3>
+          <label class="check"><input type="checkbox" bind:checked={draft.refresh.auto} onchange={() => change()} /><span>{t("refresh.auto")} <span class="hint">{t("refresh.autoHint")}</span></span></label>
           <div class="field">
-            <label for="interval">Intervall (Minuten)</label>
+            <label for="interval">{t("refresh.interval")}</label>
             <input id="interval" type="number" min="1" max="720" bind:value={draft.refresh.intervalMinutes} onchange={() => change()} />
           </div>
         </section>
@@ -670,44 +675,44 @@
           <h3>YaTTAT</h3>
           {#if info}
             <dl>
-              <dt>Version</dt><dd>{info.version} ({info.platform})</dd>
-              <dt>Einstellungen</dt><dd class="mono small">{info.configDir}</dd>
-              <dt>Cache & Logs</dt><dd class="mono small">{info.dataDir}</dd>
-              <dt>Zugangsdaten</dt>
+              <dt>{t("info.version")}</dt><dd>{info.version} ({info.platform})</dd>
+              <dt>{t("info.settings")}</dt><dd class="mono small">{info.configDir}</dd>
+              <dt>{t("info.cacheLogs")}</dt><dd class="mono small">{info.dataDir}</dd>
+              <dt>{t("info.credentials")}</dt>
               <dd>
                 {#if info.secretBackend === "keyring"}
-                  Verschlüsselt; Schlüssel im Schlüsselbund des Betriebssystems.
+                  {t("info.keyring")}
                 {:else}
-                  <span class="badge warning">Kein Schlüsselbund verfügbar</span> Schlüssel liegt als Datei mit eingeschränkten Rechten im Konfigurationsordner.
+                  <span class="badge warning">{t("info.noKeyring")}</span> {t("info.keyFile")}
                 {/if}
               </dd>
             </dl>
           {/if}
         </section>
         <section class="card block">
-          <h3>Lokaler Cache</h3>
-          <p class="hint">Aus Jira geladene Tickets und Worklogs werden lokal gespeichert, damit Auswertungen sofort erscheinen. Bereits geladene Tage werden nicht erneut abgerufen, außer über „Aktualisieren“ oder die automatische Aktualisierung.</p>
+          <h3>{t("cache.title")}</h3>
+          <p class="hint">{t("cache.hint")}</p>
           {#if info}
             <dl>
-              <dt>Worklogs</dt><dd>{info.cache.worklogs}</dd>
-              <dt>Tickets</dt><dd>{info.cache.issues}</dd>
-              <dt>Abgedeckte Tage</dt><dd>{info.cache.coverageDays} (Mitglied × Tag)</dd>
-              <dt>Größe</dt><dd>{formatBytes(info.cache.databaseBytes)}</dd>
-              <dt>Letzter Abruf</dt><dd>{store.fetchStatus.lastSuccess ? formatDateTime(store.fetchStatus.lastSuccess) : "–"}</dd>
+              <dt>{t("cache.worklogs")}</dt><dd>{info.cache.worklogs}</dd>
+              <dt>{t("cache.issues")}</dt><dd>{info.cache.issues}</dd>
+              <dt>{t("cache.coveredDays")}</dt><dd>{info.cache.coverageDays} {t("cache.memberDay")}</dd>
+              <dt>{t("cache.size")}</dt><dd>{formatBytes(info.cache.databaseBytes)}</dd>
+              <dt>{t("cache.lastFetch")}</dt><dd>{store.fetchStatus.lastSuccess ? formatDateTime(store.fetchStatus.lastSuccess) : "–"}</dd>
               {#if lastOutcome && lastOutcome.fetched}
-                <dt>Quelle</dt><dd>{lastOutcome.source === "tempoCloud" ? "Tempo Cloud" : "Jira-Worklogs"}</dd>
-                <dt>Ergebnis</dt><dd>{lastOutcome.worklogs} Worklogs von {lastOutcome.authors - lastOutcome.authorsWithoutWorklogs.length} der {lastOutcome.authors} Mitglieder auf {lastOutcome.issues} Tickets ({formatDate(lastOutcome.from, { day: "2-digit", month: "2-digit", year: "numeric" })} – {formatDate(lastOutcome.to, { day: "2-digit", month: "2-digit", year: "numeric" })}){lastOutcome.removed ? `, ${lastOutcome.removed} entfernt` : ""}</dd>
+                <dt>{t("cache.source")}</dt><dd>{t(lastOutcome.source === "tempoCloud" ? "cache.sourceTempo" : "cache.sourceJira")}</dd>
+                <dt>{t("cache.result")}</dt><dd>{t("cache.resultText", { w: lastOutcome.worklogs, a: lastOutcome.authors - lastOutcome.authorsWithoutWorklogs.length, b: lastOutcome.authors, i: lastOutcome.issues, from: formatShortDate(lastOutcome.from), to: formatShortDate(lastOutcome.to) })}{lastOutcome.removed ? t("cache.removed", { n: lastOutcome.removed }) : ""}</dd>
                 {#if lastOutcome.otherAuthors.length}
-                  <dt>Andere Autoren</dt><dd>{lastOutcome.otherAuthors.map((o) => `${o.name || o.id} (${o.count})`).join(", ")}<span class="hint"> Worklogs im Zeitraum auf den gefundenen Tickets, die Jira nicht einem Mitglied zuordnet.</span></dd>
+                  <dt>{t("cache.otherAuthors")}</dt><dd>{lastOutcome.otherAuthors.map((o) => `${o.name || o.id} (${o.count})`).join(", ")}<span class="hint"> {t("cache.otherAuthorsHint")}</span></dd>
                 {/if}
                 {#if lastOutcome.unresolvedIssues}
-                  <dt>Nicht lesbar</dt><dd>{lastOutcome.unresolvedIssues} Tempo-Worklogs auf Tickets, die in Jira nicht lesbar sind.</dd>
+                  <dt>{t("cache.unreadable")}</dt><dd>{t("cache.unreadableText", { n: lastOutcome.unresolvedIssues })}</dd>
                 {/if}
               {/if}
             </dl>
           {/if}
           <div class="row" style="margin-top:10px">
-            <button class="btn danger" type="button" onclick={clearCache}><Icon name="trash" size={14} /> Cache leeren</button>
+            <button class="btn danger" type="button" onclick={clearCache}><Icon name="trash" size={14} /> {t("cache.clear")}</button>
           </div>
         </section>
       {/if}

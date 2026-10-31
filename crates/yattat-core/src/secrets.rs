@@ -135,7 +135,7 @@ impl EncryptedSecretStore {
         let nonce = XNonce::from_slice(&nonce_bytes);
         let plain = cipher
             .decrypt(nonce, ciphertext.as_ref())
-            .map_err(|_| Error::Keyring("Gespeicherte Zugangsdaten konnten nicht entschlüsselt werden (Schlüssel geändert?)".into()))?;
+            .map_err(|_| Error::DecryptFailed)?;
         Ok(serde_json::from_slice(&plain)?)
     }
 
@@ -148,7 +148,7 @@ impl EncryptedSecretStore {
         let plain = serde_json::to_vec(map)?;
         let ciphertext = cipher
             .encrypt(nonce, plain.as_ref())
-            .map_err(|_| Error::Keyring("Verschlüsselung fehlgeschlagen".into()))?;
+            .map_err(|_| Error::EncryptFailed)?;
         let file = EncryptedFile {
             v: 1,
             nonce: b64().encode(nonce_bytes),
@@ -167,10 +167,10 @@ fn generate_key() -> [u8; 32] {
 fn decode_key(encoded: &str) -> Result<[u8; 32]> {
     let bytes = b64()
         .decode(encoded)
-        .map_err(|e| Error::Keyring(format!("Master-Key ungültig: {e}")))?;
+        .map_err(|e| Error::MasterKeyInvalid(e.to_string()))?;
     bytes
         .try_into()
-        .map_err(|_| Error::Keyring("Master-Key hat falsche Länge".into()))
+        .map_err(|_| Error::MasterKeyInvalid("wrong length".into()))
 }
 
 fn write_private(path: &std::path::Path, data: &[u8]) -> Result<()> {

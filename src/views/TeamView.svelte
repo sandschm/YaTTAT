@@ -1,7 +1,8 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte";
   import { api, type Stats } from "../lib/api";
-  import { formatDate, formatHours, formatSigned, isoWeek, parseDate, relativeTime, startOfWeek, toDateKey } from "../lib/format";
+  import { formatDate, formatHours, formatSigned, isoWeek, parseDate, relativeTime, startOfWeek, toDateKey, weekdayNames } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
   import BarChart, { type Bar } from "../components/BarChart.svelte";
   import HBars, { type Row } from "../components/HBars.svelte";
   import Donut from "../components/Donut.svelte";
@@ -40,7 +41,7 @@
     (stats?.members ?? []).map((m) => ({
       key: m.id,
       label: m.displayName,
-      sub: `${m.issueCount} Tickets · ${m.daysLogged} Tage`,
+      sub: t("team.issuesDays", { i: m.issueCount, d: m.daysLogged }),
       seconds: m.seconds,
       target: m.targetSeconds,
       color: m.color ?? store.memberColor(m.id),
@@ -67,7 +68,7 @@
     for (const d of stats.days) {
       const ws = startOfWeek(parseDate(d.date), store.firstDay);
       const k = toDateKey(ws);
-      const w = weeks.get(k) ?? { label: `KW ${isoWeek(ws)}`, full: `Woche ab ${formatDate(ws, { day: "2-digit", month: "2-digit" })}`, byMember: {}, target: 0 };
+      const w = weeks.get(k) ?? { label: t("chart.week", { n: isoWeek(ws) }), full: t("chart.weekFrom", { d: formatDate(ws, { day: "2-digit", month: "2-digit" }) }), byMember: {}, target: 0 };
       for (const [id, s] of Object.entries(d.byMember)) w.byMember[id] = (w.byMember[id] ?? 0) + s;
       w.target += d.targetSeconds;
       weeks.set(k, w);
@@ -77,13 +78,13 @@
 
   const weekdayBars = $derived.by((): Bar[] => {
     if (!stats) return [];
-    const names = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-    return stats.byWeekday.map((s, i) => ({ label: names[i], full: names[i], segments: [{ key: "all", label: "Team", color: "var(--accent)", seconds: s }] }));
+    const names = weekdayNames();
+    return stats.byWeekday.map((s, i) => ({ label: names[i], full: names[i], segments: [{ key: "all", label: t("chart.team"), color: "var(--accent)", seconds: s }] }));
   });
 
   const typeRows = $derived.by((): Row[] => {
     const palette = ["#2f6fed", "#17956b", "#e8572a", "#8b5cf6", "#ec4899", "#0ea5e9", "#f59e0b"];
-    return (stats?.byIssueType ?? []).map((g, i) => ({ key: g.key, label: g.label, seconds: g.seconds, color: palette[i % palette.length] }));
+    return (stats?.byIssueType ?? []).map((g, i) => ({ key: g.key || "?", label: g.label || t("common.unknown"), seconds: g.seconds, color: palette[i % palette.length] }));
   });
 
   const sortedMembers = $derived.by(() => {
@@ -124,96 +125,96 @@
 
 <div class="view">
   <div class="view-header">
-    <h1>Team{store.team ? `: ${store.team.name}` : ""}</h1>
+    <h1>{t("team.title")}{store.team ? `: ${store.team.name}` : ""}</h1>
     {#if loading}<span class="spin faint"><Icon name="refresh" size={14} /></span>{/if}
   </div>
   <div class="view-body">
     {#if !store.memberIds.length}
       <div class="card empty">
         <Icon name="users" size={28} />
-        <h3>Noch keine Teammitglieder</h3>
-        <p class="muted">Lege unter Einstellungen → Team & Mitglieder fest, wessen Zeiten ausgewertet werden sollen.</p>
-        <button class="btn primary" type="button" onclick={() => (store.view = "settings")}>Zu den Einstellungen</button>
+        <h3>{t("team.noMembersTitle")}</h3>
+        <p class="muted">{t("team.noMembersText")}</p>
+        <button class="btn primary" type="button" onclick={() => (store.view = "settings")}>{t("team.toSettings")}</button>
       </div>
     {:else if stats}
       <div class="kpis">
         <div class="kpi card">
-          <span class="label">Erfasst</span>
+          <span class="label">{t("kpi.logged")}</span>
           <span class="value mono">{formatHours(stats.totalSeconds, tf)}</span>
-          <span class="sub faint">{stats.worklogCount} Worklogs an {stats.daysLogged} Tagen</span>
+          <span class="sub faint">{t("kpi.worklogsOnDays", { n: stats.worklogCount, d: stats.daysLogged })}</span>
         </div>
         {#if showTargets}
           <div class="kpi card">
-            <span class="label">Soll</span>
+            <span class="label">{t("kpi.target")}</span>
             <span class="value mono">{formatHours(stats.targetSeconds, tf)}</span>
-            <span class="sub faint">{stats.workDays} Arbeitstage bis heute</span>
+            <span class="sub faint">{t("kpi.workDays", { n: stats.workDays })}</span>
           </div>
           <div class="kpi card" class:pos={balance >= 0} class:neg={balance < 0}>
-            <span class="label">Saldo</span>
+            <span class="label">{t("kpi.balance")}</span>
             <span class="value mono">{formatSigned(balance, tf)}</span>
-            <span class="sub faint">{stats.targetSeconds ? Math.round((stats.totalSeconds / stats.targetSeconds) * 100) : 0} % des Solls</span>
+            <span class="sub faint">{t("kpi.percentOfTarget", { p: stats.targetSeconds ? Math.round((stats.totalSeconds / stats.targetSeconds) * 100) : 0 })}</span>
           </div>
         {/if}
         <div class="kpi card">
-          <span class="label">Ø pro Mitglied</span>
+          <span class="label">{t("kpi.avgPerMember")}</span>
           <span class="value mono">{formatHours(activeMembers ? stats.totalSeconds / activeMembers : 0, tf)}</span>
-          <span class="sub faint">{activeMembers} von {stats.members.length} mit Zeiten</span>
+          <span class="sub faint">{t("kpi.membersWithTimes", { a: activeMembers, b: stats.members.length })}</span>
         </div>
         <div class="kpi card">
-          <span class="label">Tickets</span>
+          <span class="label">{t("kpi.issues")}</span>
           <span class="value mono">{stats.issueCount}</span>
-          <span class="sub faint">{stats.byProject.length} {stats.byProject.length === 1 ? "Projekt" : "Projekte"}</span>
+          <span class="sub faint">{t(stats.byProject.length === 1 ? "kpi.project1" : "kpi.projectN", { n: stats.byProject.length })}</span>
         </div>
         <div class="kpi card">
-          <span class="label">Ø pro Tag</span>
+          <span class="label">{t("kpi.avgPerDay")}</span>
           <span class="value mono">{formatHours(stats.daysLogged ? stats.totalSeconds / stats.daysLogged : 0, tf)}</span>
-          <span class="sub faint">an Tagen mit Buchungen</span>
+          <span class="sub faint">{t("kpi.onDaysWithLogs")}</span>
         </div>
       </div>
 
       <div class="grid">
         <section class="card panel">
-          <h3>Stunden pro Mitglied</h3>
+          <h3>{t("team.hoursPerMember")}</h3>
           <HBars rows={memberRows} {showTargets} onselect={(r) => openMember(r.key)} />
         </section>
         <section class="card panel">
-          <h3>Verteilung nach Projekt</h3>
+          <h3>{t("team.byProject")}</h3>
           <Donut slices={stats.byProject.map((p) => ({ key: p.key, label: `${p.key} · ${p.label}`, seconds: p.seconds, color: p.color ?? store.projectColor(p.key) }))} />
         </section>
         <section class="card panel wide">
-          <h3>Stunden pro {bars.length === stats.days.length ? "Tag" : "Woche"} nach Mitglied</h3>
+          <h3>{t(bars.length === stats.days.length ? "team.hoursPerDayByMember" : "team.hoursPerWeekByMember")}</h3>
           <BarChart {bars} {showTargets} />
           <div class="legend">
             {#each stats.members as m (m.id)}
               <span class="legend-item"><span class="dot" style="background:{m.color ?? store.memberColor(m.id)}"></span>{m.displayName}</span>
             {/each}
-            {#if showTargets}<span class="legend-item faint"><span class="dash"></span>Soll</span>{/if}
+            {#if showTargets}<span class="legend-item faint"><span class="dash"></span>{t("chart.target")}</span>{/if}
           </div>
         </section>
         <section class="card panel">
-          <h3>Nach Tickettyp</h3>
+          <h3>{t("team.byType")}</h3>
           <HBars rows={typeRows} labelWidth={120} />
         </section>
         <section class="card panel">
-          <h3>Nach Wochentag</h3>
+          <h3>{t("team.byWeekday")}</h3>
           <BarChart bars={weekdayBars} height={150} showTargets={false} />
         </section>
         <section class="card panel wide table-panel">
-          <h3>Mitglieder</h3>
+          <h3>{t("team.members")}</h3>
           <table>
             <thead>
               <tr>
-                <th><button type="button" onclick={() => sortBy("name")}>Mitglied</button></th>
-                <th class="num"><button type="button" onclick={() => sortBy("seconds")}>Erfasst</button></th>
+                <th><button type="button" onclick={() => sortBy("name")}>{t("col.member")}</button></th>
+                <th class="num"><button type="button" onclick={() => sortBy("seconds")}>{t("col.logged")}</button></th>
                 {#if showTargets}
-                  <th class="num"><button type="button" onclick={() => sortBy("target")}>Soll</button></th>
-                  <th class="num"><button type="button" onclick={() => sortBy("balance")}>Saldo</button></th>
+                  <th class="num"><button type="button" onclick={() => sortBy("target")}>{t("col.target")}</button></th>
+                  <th class="num"><button type="button" onclick={() => sortBy("balance")}>{t("col.balance")}</button></th>
                 {/if}
-                <th class="num"><button type="button" onclick={() => sortBy("issues")}>Tickets</button></th>
-                <th class="num"><button type="button" onclick={() => sortBy("days")}>Tage</button></th>
-                <th class="num"><button type="button" onclick={() => sortBy("avg")}>Ø/Tag</button></th>
-                <th><button type="button" onclick={() => sortBy("last")}>Letzter Worklog</button></th>
-                <th>Projekte</th>
+                <th class="num"><button type="button" onclick={() => sortBy("issues")}>{t("col.issues")}</button></th>
+                <th class="num"><button type="button" onclick={() => sortBy("days")}>{t("col.days")}</button></th>
+                <th class="num"><button type="button" onclick={() => sortBy("avg")}>{t("col.avgPerDay")}</button></th>
+                <th><button type="button" onclick={() => sortBy("last")}>{t("col.lastWorklog")}</button></th>
+                <th>{t("col.projects")}</th>
               </tr>
             </thead>
             <tbody>
@@ -244,7 +245,7 @@
         </section>
       </div>
     {:else}
-      <p class="faint">Lade …</p>
+      <p class="faint">{t("common.loading")}</p>
     {/if}
   </div>
 </div>

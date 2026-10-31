@@ -2,6 +2,7 @@
   // Confirmation dialog and toasts.
   import { store } from "../lib/store.svelte";
   import Icon from "./Icon.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   const confirm = $derived(store.confirmRequest);
 
@@ -18,7 +19,7 @@
       <h2>{confirm.title}</h2>
       <p>{confirm.message}</p>
       <div class="actions">
-        <button class="btn" type="button" onclick={() => answer(false)}>Abbrechen</button>
+        <button class="btn" type="button" onclick={() => answer(false)}>{t("common.cancel")}</button>
         <button class="btn" class:danger={confirm.danger} class:primary={!confirm.danger} type="button" onclick={() => answer(true)}>{confirm.confirmLabel}</button>
       </div>
     </div>
@@ -29,7 +30,7 @@
   {#each store.toasts as toast (toast.id)}
     <div class="toast {toast.kind}">
       <span class="grow">{toast.message}</span>
-      <button class="btn ghost sm icon" type="button" onclick={() => store.dismissToast(toast.id)} aria-label="Schließen"><Icon name="x" size={14} /></button>
+      <button class="btn ghost sm icon" type="button" onclick={() => store.dismissToast(toast.id)} aria-label={t("common.close")}><Icon name="x" size={14} /></button>
     </div>
   {/each}
 </div>

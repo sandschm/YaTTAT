@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use yattat_core::fetch::{fetch_range, FetchProgress, FetchRequest, SourceComparison};
+use yattat_core::i18n::{t, tf};
 use yattat_core::jira::JiraClient;
 use yattat_core::models::*;
 use yattat_core::secrets;
@@ -28,9 +29,10 @@ pub async fn install_client(
     credential: Credential,
 ) -> Result<AuthStatus, String> {
     let settings = state.settings();
+    let lang = settings.lang();
     let base = settings.jira_base();
     if base.is_empty() {
-        return Err("Keine Jira-URL konfiguriert".into());
+        return Err(t(lang, "noJiraUrl").into());
     }
     let deployment = state
         .server
@@ -40,13 +42,13 @@ pub async fn install_client(
         .map(|s| s.deployment)
         .unwrap_or_default();
     let client =
-        Arc::new(JiraClient::new(&base, credential, deployment).map_err(|e| e.to_string())?);
+        Arc::new(JiraClient::new(&base, credential, deployment).map_err(|e| e.localized(lang))?);
     let (user, server) = match client.verify().await {
         Ok(v) => v,
         Err(Error::AuthExpired(code)) => {
-            return Err(format!("Anmeldung nicht akzeptiert (HTTP {code})"));
+            return Err(tf(lang, "loginNotAccepted", &[&code.to_string()]));
         }
-        Err(e) => return Err(e.to_string()),
+        Err(e) => return Err(e.localized(lang)),
     };
     // Persist the (possibly rotated) credential and keep it updated.
     if let Some(cookies) = client.cookies() {
@@ -99,17 +101,18 @@ pub async fn restore_session(app: &AppHandle, state: &Arc<AppState>) {
         Ok(Some(credential)) => {
             if let Err(e) = install_client(app, state, credential).await {
                 tracing::info!("stored session not usable: {e}");
-                state.clear_session(Some(
-                    "Gespeicherte Sitzung ist nicht mehr gültig. Bitte erneut anmelden.".into(),
-                ));
+                state.clear_session(Some(t(state.lang(), "storedSessionInvalid").into()));
                 emit(app, "auth-changed", state.auth_status());
             }
         }
         Ok(None) => {}
         Err(e) => {
             tracing::warn!("secret store error: {e}");
-            state.clear_session(Some(format!(
-                "Zugangsdaten konnten nicht gelesen werden: {e}"
+            let lang = state.lang();
+            state.clear_session(Some(tf(
+                lang,
+                "credentialsUnreadable",
+                &[&e.localized(lang)],
             )));
             emit(app, "auth-changed", state.auth_status());
         }
@@ -165,10 +168,7 @@ pub async fn fetch_worklogs(
                 let status = {
                     let mut f = state.fetch.write().unwrap();
                     f.in_progress = false;
-                    f.last_error = Some(
-                        "Tempo Cloud ist als Quelle gewählt, aber es ist kein Tempo-API-Token gespeichert (Einstellungen → Verbindung)."
-                            .into(),
-                    );
+                    f.last_error = Some(t(settings.lang(), "tempoTokenMissing").into());
                     f.clone()
                 };
                 emit(app, "fetch-status", status.clone());
@@ -209,7 +209,7 @@ pub async fn fetch_worklogs(
             .await
             .map_err(|e| {
                 handle_auth_error(app, state, &e);
-                e.to_string()
+                e.localized(settings.lang())
             })
         }
     };
@@ -299,13 +299,14 @@ pub async fn compare_sources(
     member_ids: Vec<String>,
 ) -> Result<SourceComparison, String> {
     let settings = state.settings();
+    let lang = settings.lang();
     let jira = state.jira()?;
-    let tempo = state.tempo_cloud().ok_or(
-        "Für den Abgleich wird ein Tempo-API-Token benötigt (Einstellungen → Verbindung → Quelle der Zeiten).",
-    )?;
+    let tempo = state
+        .tempo_cloud()
+        .ok_or_else(|| t(lang, "compareNeedsTempo").to_string())?;
     let members = settings.members_by_ids(&member_ids);
     if members.is_empty() {
-        return Err("Keine Mitglieder im Team".into());
+        return Err(t(lang, "noMembers").into());
     }
     let req = FetchRequest {
         from,
@@ -344,7 +345,7 @@ pub async fn compare_sources(
     .await
     .map_err(|e| {
         handle_auth_error(app, state, &e);
-        e.to_string()
+        e.localized(lang)
     });
     emit(
         app,

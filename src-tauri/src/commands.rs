@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use yattat_core::export::{self, ExportRow};
 use yattat_core::fetch::SourceComparison;
+use yattat_core::i18n::{t, tf, Lang};
 use yattat_core::models::*;
 use yattat_core::secrets;
 use yattat_core::settings::{AuthMethod, Settings, PALETTE};
@@ -19,8 +20,26 @@ use yattat_core::Error;
 
 type S<'a> = State<'a, Arc<AppState>>;
 
-fn err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+/// Errors are sent to the UI as text in the configured language.
+trait Localize {
+    fn localize(self, lang: Lang) -> String;
+}
+
+impl Localize for Error {
+    fn localize(self, lang: Lang) -> String {
+        self.localized(lang)
+    }
+}
+
+impl Localize for std::io::Error {
+    fn localize(self, lang: Lang) -> String {
+        Error::from(self).localized(lang)
+    }
+}
+
+/// `map_err(lz(&state))`: localizes core and I/O errors.
+fn lz<E: Localize>(state: &AppState) -> impl Fn(E) -> String + '_ {
+    move |e| e.localize(state.lang())
 }
 
 /// Color of a project: configured, otherwise a stable pick from the palette.
@@ -48,14 +67,14 @@ pub async fn save_settings(
     mut settings: Settings,
 ) -> Result<Settings, String> {
     settings.jira.base_url =
-        yattat_core::settings::normalize_jira_url(&settings.jira.base_url).map_err(err)?;
+        yattat_core::settings::normalize_jira_url(&settings.jira.base_url).map_err(lz(&state))?;
     settings.tidy();
-    settings.validate().map_err(err)?;
+    settings.validate().map_err(lz(&state))?;
     let old = state.settings();
-    yattat_core::settings::save_settings(&state.paths, &settings).map_err(err)?;
+    yattat_core::settings::save_settings(&state.paths, &settings).map_err(lz(&state))?;
     *state.settings.write().unwrap() = settings.clone();
     if old.jira_base() != settings.jira_base() && state.is_authenticated() {
-        state.clear_session(Some("Jira-URL geändert. Bitte erneut anmelden.".into()));
+        state.clear_session(Some(t(state.lang(), "jiraUrlChanged").into()));
         emit(&app, "auth-changed", state.auth_status());
     }
     if old.tempo.cloud_api_base != settings.tempo.cloud_api_base {
@@ -63,7 +82,7 @@ pub async fn save_settings(
     }
     // Jira and Tempo worklog ids are different id spaces: a source switch starts from an empty cache.
     if old.tempo.source != settings.tempo.source {
-        state.store.clear().map_err(err)?;
+        state.store.clear().map_err(lz(&state))?;
         state.reset_fetch_status();
         emit(&app, "fetch-status", state.fetch_status());
         emit(&app, "data-changed", ());
@@ -109,18 +128,18 @@ pub async fn login_with_password(
     let settings = state.settings();
     let base = settings.jira_base();
     if base.is_empty() {
-        return Err("Bitte zuerst die Jira-URL eintragen".into());
+        return Err(t(state.lang(), "noJiraUrl").into());
     }
     // Validate against the session resource first: gives clear errors (wrong password, CAPTCHA).
     yattat_core::jira::JiraClient::login_with_password(&base, &username, &password)
         .await
-        .map_err(err)?;
+        .map_err(lz(&state))?;
     let credential = Credential::Basic {
         username: username.clone(),
         password,
     };
     let status = jobs::install_client(&app, &state, credential.clone()).await?;
-    secrets::save_credential(state.secrets.as_ref(), &base, &credential).map_err(err)?;
+    secrets::save_credential(state.secrets.as_ref(), &base, &credential).map_err(lz(&state))?;
     {
         let mut s = state.settings.write().unwrap();
         s.jira.auth_method = AuthMethod::Password;
@@ -141,7 +160,7 @@ pub async fn login_with_token(
     let settings = state.settings();
     let base = settings.jira_base();
     if base.is_empty() {
-        return Err("Bitte zuerst die Jira-URL eintragen".into());
+        return Err(t(state.lang(), "noJiraUrl").into());
     }
     let (credential, method) = match kind.as_str() {
         "pat" => (
@@ -157,10 +176,10 @@ pub async fn login_with_token(
             },
             AuthMethod::ApiToken,
         ),
-        other => return Err(format!("Unbekannte Anmeldeart {other}")),
+        other => return Err(tf(state.lang(), "unknownAuthMethod", &[other])),
     };
     let status = jobs::install_client(&app, &state, credential.clone()).await?;
-    secrets::save_credential(state.secrets.as_ref(), &base, &credential).map_err(err)?;
+    secrets::save_credential(state.secrets.as_ref(), &base, &credential).map_err(lz(&state))?;
     {
         let mut s = state.settings.write().unwrap();
         s.jira.auth_method = method;
@@ -185,7 +204,7 @@ fn map_jira_error(state: &AppState, e: Error) -> String {
     if matches!(e, Error::AuthExpired(_)) {
         state.mark_auth_expired();
     }
-    e.to_string()
+    state.l(&e)
 }
 
 #[tauri::command]
@@ -206,7 +225,7 @@ pub async fn search_projects(state: S<'_>, query: String) -> Result<Vec<Project>
 #[tauri::command]
 pub fn list_projects(state: S<'_>) -> Result<Vec<Project>, String> {
     let settings = state.settings();
-    let mut projects = state.store.list_projects().map_err(err)?;
+    let mut projects = state.store.list_projects().map_err(lz(&state))?;
     for p in &mut projects {
         p.color = Some(project_color(&settings, &p.key));
     }
@@ -231,7 +250,7 @@ pub async fn set_project_selection(
             .entry(p.key.clone())
             .or_insert(color);
     }
-    state.store.upsert_projects(&projects).map_err(err)?;
+    state.store.upsert_projects(&projects).map_err(lz(&state))?;
     save_settings(app, state, settings).await
 }
 
@@ -295,7 +314,7 @@ pub fn get_coverage(
         .into_iter()
         .map(|m| m.id)
         .collect();
-    state.store.coverage(&ids, from, to).map_err(err)
+    state.store.coverage(&ids, from, to).map_err(lz(&state))
 }
 
 struct Inputs {
@@ -325,8 +344,11 @@ fn inputs(
     let settings = state.settings();
     let members = settings.members_by_ids(member_ids);
     let ids: Vec<String> = members.iter().map(|m| m.id.clone()).collect();
-    let issues = state.store.issue_map().map_err(err)?;
-    let mut worklogs = state.store.list_worklogs(from, to, &ids).map_err(err)?;
+    let issues = state.store.issue_map().map_err(lz(state))?;
+    let mut worklogs = state
+        .store
+        .list_worklogs(from, to, &ids)
+        .map_err(lz(state))?;
     if !settings.selection.project_keys.is_empty() {
         let allowed: HashSet<&str> = settings
             .selection
@@ -339,7 +361,7 @@ fn inputs(
     let mut projects: HashMap<String, Project> = state
         .store
         .list_projects()
-        .map_err(err)?
+        .map_err(lz(state))?
         .into_iter()
         .map(|mut p| {
             p.color = Some(project_color(&settings, &p.key));
@@ -447,11 +469,13 @@ pub async fn export_worklogs(
     let rows = rows(&state, from, to, &member_ids, None, summarize)?;
     let settings = state.settings();
     let content = match format.as_str() {
-        "csv" => export::to_csv(&rows, settings.work.time_format).map_err(err)?,
-        "json" => export::to_json(&rows).map_err(err)?,
-        other => return Err(format!("Unbekanntes Format {other}")),
+        "csv" => {
+            export::to_csv(&rows, settings.work.time_format, settings.lang()).map_err(lz(&state))?
+        }
+        "json" => export::to_json(&rows).map_err(lz(&state))?,
+        other => return Err(tf(state.lang(), "unknownFormat", &[other])),
     };
-    std::fs::write(&path, content).map_err(err)?;
+    std::fs::write(&path, content).map_err(lz(&state))?;
     Ok(rows.len())
 }
 
@@ -474,7 +498,7 @@ pub fn get_issue_url(state: S<'_>, key: String) -> String {
 
 #[tauri::command]
 pub fn clear_cache(app: AppHandle, state: S<'_>) -> Result<CacheInfo, String> {
-    state.store.clear().map_err(err)?;
+    state.store.clear().map_err(lz(&state))?;
     {
         let mut f = state.fetch.write().unwrap();
         f.last_success = None;
@@ -483,7 +507,7 @@ pub fn clear_cache(app: AppHandle, state: S<'_>) -> Result<CacheInfo, String> {
     }
     emit(&app, "fetch-status", state.fetch_status());
     emit(&app, "data-changed", ());
-    state.store.cache_info().map_err(err)
+    state.store.cache_info().map_err(lz(&state))
 }
 
 // ---------------------------------------------------------------------- tempo
@@ -502,15 +526,15 @@ pub async fn set_tempo_cloud_token(
         .filter(|t| !t.is_empty())
     {
         Some(t) => {
-            let client = TempoCloud::new(&settings.tempo.cloud_api_base, &t).map_err(err)?;
+            let client = TempoCloud::new(&settings.tempo.cloud_api_base, &t).map_err(lz(&state))?;
             let me = state.user().map(|u| u.id);
             client
                 .verify(me.as_deref())
                 .await
-                .map_err(|e| format!("Tempo-Token wurde nicht akzeptiert: {e}"))?;
-            state.secrets.set(&key, &t).map_err(err)?;
+                .map_err(|e| tf(state.lang(), "tempoTokenRejected", &[&state.l(&e)]))?;
+            state.secrets.set(&key, &t).map_err(lz(&state))?;
         }
-        None => state.secrets.delete(&key).map_err(err)?,
+        None => state.secrets.delete(&key).map_err(lz(&state))?,
     }
     jobs::load_tempo_cloud(&state);
     let mut settings = state.settings();
@@ -541,6 +565,6 @@ pub fn get_app_info(state: S<'_>) -> Result<AppInfo, String> {
         data_dir: state.paths.data_dir.display().to_string(),
         log_dir: state.paths.log_dir().display().to_string(),
         secret_backend: state.secrets.backend(),
-        cache: state.store.cache_info().map_err(err)?,
+        cache: state.store.cache_info().map_err(lz(&state))?,
     })
 }

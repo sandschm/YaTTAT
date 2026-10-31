@@ -102,7 +102,7 @@ fn d(date: NaiveDate) -> String {
 }
 
 fn parse_date(s: &str) -> Result<NaiveDate> {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| Error::Parse(format!("Datum {s}: {e}")))
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| Error::InvalidDate(s.to_string()))
 }
 
 fn parse_utc(s: &str) -> Option<DateTime<Utc>> {

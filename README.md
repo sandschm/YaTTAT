@@ -1,142 +1,140 @@
 # YaTTAT – Yet another Time Tracking Analysis Tool
 
-Desktop-Auswertung der in Jira gebuchten Zeiten eines Teams für macOS, Windows und Linux. YaTTAT
-ruft die Worklogs der Teammitglieder aus Jira ab (Cloud und Data Center) und zeigt Gesamtzeiten,
-Zeiten pro Ticket und Statistiken pro Mitglied. Es ist das Gegenstück zu
-[YaTTT](https://github.com/sandschm/YaTTT): YaTTT erfasst Zeiten, YaTTAT wertet sie aus.
+Desktop analysis of the time a team logs in Jira, for macOS, Windows and Linux. YaTTAT fetches the
+worklogs of your team members from Jira (Cloud and Data Center) or from Tempo Cloud and shows total
+hours, hours per issue and statistics per member. It is the counterpart of
+[YaTTT](https://github.com/sandschm/YaTTT): YaTTT tracks time, YaTTAT analyses it.
 
-Geschrieben in Rust (Tauri 2, Fachlogik im Crate `yattat-core`) mit einer Svelte-Oberfläche.
-YaTTAT liest nur aus Jira und schreibt nichts zurück.
+Written in Rust (Tauri 2, business logic in the `yattat-core` crate) with a Svelte user interface.
+YaTTAT only reads from Jira and never writes back. The interface is available in English and German.
 
 <p align="center">
-  <img src="docs/screenshots/team.png" width="920" alt="YaTTAT: Team-Übersicht mit Kennzahlen, Stunden pro Mitglied, Verteilung nach Projekt und Stunden pro Tag">
+  <img src="docs/screenshots/team.png" width="920" alt="YaTTAT: team overview with KPIs, hours per member, distribution by project and hours per day">
 </p>
 <p align="center">
-  <img src="docs/screenshots/member.png" width="455" alt="Mitglied: Kennzahlen, Stunden pro Tag, Projekte, Top-Tickets">
-  <img src="docs/screenshots/tickets.png" width="455" alt="Tickets: Zeit pro Ticket mit Anteilen der Mitglieder">
+  <img src="docs/screenshots/member.png" width="455" alt="Member: KPIs, hours per day, projects, top issues">
+  <img src="docs/screenshots/tickets.png" width="455" alt="Issues: time per issue with the members' shares">
 </p>
 
-<sub>Die Screenshots zeigen die Beispieldaten des Browser-Mocks.</sub>
+<sub>The screenshots show the sample data of the browser mock.</sub>
 
-## Funktionen
+## Features
 
-- **Team und Mitglieder** in den Einstellungen: Jira-Benutzer suchen und einem Team zuordnen,
-  mehrere Teams möglich. Je Mitglied optional Wochenstunden (Teilzeit) und eine Farbe für die Diagramme.
-- **Team-Übersicht**: Erfasst, Soll und Saldo, Ø pro Mitglied und Tag, Anzahl Tickets; Stunden pro
-  Mitglied mit Soll-Markierung, Stunden pro Tag bzw. Woche gestapelt nach Mitglied, Verteilung nach
-  Projekt, Tickettyp und Wochentag, sortierbare Mitgliedertabelle mit letztem Worklog.
-- **Mitglied**: Kennzahlen und Soll/Ist, Verlauf pro Tag/Woche, Verteilung nach Projekt,
-  Top-Tickets, alle Worklogs nach Tagen mit Kommentaren, Export als CSV oder JSON.
-- **Tickets**: Zeit pro Ticket im Zeitraum mit Anteil je Mitglied, Schätzung und Gesamtzeit laut
-  Jira, Suche, Filter nach Projekt und Typ, Gruppierung nach Epic, Projekt oder Tickettyp,
-  Worklogs je Ticket, Sprung ins Ticket in Jira.
-- **Zeitraum**: diese/letzte Woche, dieser/letzter Monat, dieses/letztes Quartal, dieses Jahr oder
-  frei wählbar.
-- **Lokaler Cache**: Geladene Tickets und Worklogs liegen in einer SQLite-Datenbank. YaTTAT merkt
-  sich je Mitglied, welche Tage geladen sind, und holt nur fehlende Tage nach. „Aktualisieren“ lädt
-  den angezeigten Zeitraum neu (nachträgliche Buchungen und Löschungen werden übernommen),
-  optional automatisch im eingestellten Intervall.
-- **Quelle der Zeiten**: Jira-Worklogs (Standard) oder **Tempo Cloud** mit Tempo-API-Token. Bucht das
-  Team in Tempo, führt Jira die Worklogs oft unter dem Tempo-App-Konto; dann liefert nur die Tempo-API
-  die echten Autoren. YaTTAT zeigt nach dem Abruf an, wenn Jira Worklogs anderen Autoren zuordnet.
-- **Quellen-Abgleich**: liest einen Zeitraum aus Jira und Tempo und vergleicht beide je Mitglied und
-  Tag, als Nachweis, dass keine Zeiten fehlen.
-- **Projektauswahl** (optional): Auswertung auf bestimmte Projekte beschränken.
-- Hell-/Dunkelmodus, Zeitformat Stunden:Minuten oder dezimal, Wochenbeginn Montag oder Sonntag.
+- **Team and members** in the settings: search Jira users and assign them to a team, several teams
+  possible. Per member optional weekly hours (part-time) and a colour for the charts.
+- **Team overview**: logged, target and balance, average per member and day, number of issues;
+  hours per member with target marker, hours per day or week stacked by member, distribution by
+  project, issue type and weekday, sortable member table with the last worklog.
+- **Member**: KPIs and target/actual, trend per day/week, distribution by project, top issues,
+  all worklogs by day with comments, export as CSV or JSON.
+- **Issues**: time per issue in the range with the share of every member, estimate and Jira total,
+  search, filter by project and type, grouping by epic, project or issue type, worklogs per issue,
+  jump to the issue in Jira.
+- **Range**: this/last week, this/last month, this/last quarter, this year or a custom range.
+- **Source of times**: Jira worklogs (default) or **Tempo Cloud** with a Tempo API token. If the
+  team logs time in Tempo, Jira often lists the worklogs under the Tempo app account; only the
+  Tempo API then reports the real authors. YaTTAT shows after a fetch when Jira attributes worklogs
+  to other authors.
+- **Source comparison**: reads a range from Jira and from Tempo and compares both per member and
+  day, as proof that no times are missing.
+- **Local cache**: loaded issues and worklogs live in a SQLite database. YaTTAT remembers per
+  member which days are loaded and fetches only the missing ones. "Refresh" reloads the displayed
+  range (later bookings and deletions are picked up), optionally automatically at the configured
+  interval.
+- **Project selection** (optional): restrict the analysis to certain projects.
+- Light/dark mode, time format hours:minutes or decimal, week starting Monday or Sunday, language
+  English or German (follows the system by default).
 
-## Anmeldung bei Jira (SSO, zweiter Faktor, kein API-Token)
+## Signing in to Jira (SSO, second factor, no API token)
 
-Standard ist die **Browser-Anmeldung**: Die App öffnet die Jira-Loginseite in einem eigenen
-Fenster. SSO-Weiterleitungen und ein zweiter Faktor funktionieren wie im Browser. Anschließend
-übernimmt die App die Sitzung; ein Passwort wird dabei nie gespeichert. Alternativ: Benutzername
-und Passwort (Data Center ohne SSO), Personal Access Token (Data Center) oder E-Mail und API-Token
-(Cloud). Details: [docs/JIRA_AUTH.md](docs/JIRA_AUTH.md).
+The default is the **browser login**: the app opens the Jira login page in its own window. SSO
+redirects and a second factor work as in the browser. The app then takes over the session; a
+password is never stored. Alternatives: username and password (Data Center without SSO), personal
+access token (Data Center) or e-mail and API token (Cloud). Details: [docs/JIRA_AUTH.md](docs/JIRA_AUTH.md).
 
-Ausgewertet werden nur Worklogs auf Tickets, die die angemeldete Person in Jira lesen darf.
+Only worklogs on issues the signed-in person may read in Jira are analysed.
 
 ## Installation
 
-Fertige Pakete liegen bei den [GitHub Releases](../../releases): `.dmg` (macOS), `.msi`/`-setup.exe`
-(Windows), `.deb`/`.rpm`/`.AppImage` (Linux). Ohne Code-Signatur meldet macOS beim ersten Start
-eine Warnung: Rechtsklick → Öffnen oder `xattr -dr com.apple.quarantine /Applications/YaTTAT.app`.
+Ready-made packages are attached to the [GitHub releases](../../releases): `.dmg` (macOS),
+`.msi`/`-setup.exe` (Windows), `.deb`/`.rpm`/`.AppImage` (Linux). Without a code signature macOS
+warns on first start: right-click → Open or `xattr -dr com.apple.quarantine /Applications/YaTTAT.app`.
 
-Linux benötigt WebKitGTK 4.1.
+Linux needs WebKitGTK 4.1.
 
-## Kurzanleitung
+## Quick guide
 
-### 1️⃣ Verbinden
+### 1️⃣ Connect
 
-**Einstellungen → Verbindung:** Jira-URL eintragen (bei Jira Cloud nur `https://firma.atlassian.net`),
-„Browser-Anmeldung“ lassen, **Anmelden**. Im Login-Fenster meldest du dich wie gewohnt an, mit SSO
-und zweitem Faktor.
+**Settings → Connection:** enter the Jira URL (Jira Cloud: only `https://company.atlassian.net`),
+keep "Browser login", click **Sign in**. In the login window you sign in as usual, with SSO and a
+second factor.
 
-<img src="docs/screenshots/step-1-verbinden.png" width="760" alt="Einstellungen: Jira-URL und Anmeldeart">
+<img src="docs/screenshots/step-1-connect.png" width="760" alt="Settings: Jira URL and login method">
 
-Bucht euer Team in **Tempo**? Dann unter **Quelle der Zeiten** „Tempo Cloud“ wählen und ein
-Tempo-API-Token eintragen (Tempo → Einstellungen → API-Integration). Das Token braucht in Tempo die
-Berechtigung, die Worklogs der Mitglieder zu sehen.
+Does your team log time in **Tempo**? Then choose "Tempo Cloud" under **Source of times** and enter
+a Tempo API token (Tempo → Settings → API integration). The token needs the Tempo permission to see
+the members' worklogs.
 
-### 2️⃣ Team und Mitglieder anlegen
+### 2️⃣ Create a team and add members
 
-**Einstellungen → Team & Mitglieder:** Team anlegen oder umbenennen, dann Jira-Benutzer suchen und
-per Klick hinzufügen („Mich hinzufügen“ für dich selbst). Teilzeit? Wochenstunden eintragen, damit
-das Soll passt. Die Farbe gilt in allen Diagrammen.
+**Settings → Team & members:** create or rename a team, then search Jira users and add them with a
+click ("Add me" for yourself). Part-time? Enter weekly hours so the target fits. The colour is used
+in all charts.
 
-<img src="docs/screenshots/step-2-team.png" width="760" alt="Einstellungen: Team mit Mitgliedern, Wochenstunden und Farbe">
+<img src="docs/screenshots/step-2-team.png" width="760" alt="Settings: team with members, weekly hours and colour">
 
-### 3️⃣ Zeitraum wählen
+### 3️⃣ Choose the range
 
-In der Kopfzeile Team und Zeitraum wählen. Fehlende Tage werden automatisch geladen; der
-Fortschritt steht rechts („Worklogs 12/80“). **Stand** nennt den ältesten Abruf im Zeitraum; ist er
-älter als das doppelte Aktualisierungsintervall, erscheint „Aktualisieren empfohlen“. **Aktualisieren**
-lädt den Zeitraum jederzeit neu und übernimmt nachträgliche Buchungen und Löschungen.
+Pick team and range in the top bar. Missing days are loaded automatically; the progress is shown on
+the right ("Worklogs 12/80"). **As of** names the oldest fetch in the range; if it is older than
+twice the refresh interval, "refresh recommended" appears. **Refresh** reloads the range at any time
+and picks up later bookings and deletions.
 
-<img src="docs/screenshots/step-3-zeitraum.png" width="760" alt="Kopfzeile: Team, Zeitraum-Presets, Stand und Aktualisieren">
+<img src="docs/screenshots/step-3-range.png" width="760" alt="Top bar: team, range presets, status and refresh">
 
-### 4️⃣ Team im Blick
+### 4️⃣ Team at a glance
 
-**Team:** Erfasst, Soll, Saldo und Ø pro Mitglied, Stunden pro Mitglied mit Soll-Markierung, Stunden
-pro Tag nach Mitglied, Verteilung nach Projekt. Ein Klick auf ein Mitglied öffnet dessen Auswertung.
+**Team:** logged, target, balance and average per member, hours per member with target marker,
+hours per day by member, distribution by project. A click on a member opens their analysis.
 
-<img src="docs/screenshots/step-4-team.png" width="760" alt="Team: Kennzahlen und Diagramme">
+<img src="docs/screenshots/step-4-team.png" width="760" alt="Team: KPIs and charts">
 
-### 5️⃣ Einzelnes Mitglied
+### 5️⃣ A single member
 
-**Mitglied:** Gesamtzeit und Soll/Ist, Verlauf, Projekte, Top-Tickets und alle Worklogs nach Tagen.
-Export als CSV (Excel-tauglich) oder JSON.
+**Member:** total hours and target/actual, trend, projects, top issues and all worklogs by day.
+Export as CSV (Excel-ready) or JSON.
 
-<img src="docs/screenshots/step-5-mitglied.png" width="760" alt="Mitglied: Kennzahlen, Verlauf, Worklogs">
+<img src="docs/screenshots/step-5-member.png" width="760" alt="Member: KPIs, trend, worklogs">
 
-### 6️⃣ Zeiten pro Ticket
+### 6️⃣ Hours per issue
 
-**Tickets:** Welche Tickets haben im Zeitraum die meiste Zeit bekommen, und von wem? Der Balken
-zeigt die Anteile der Mitglieder, daneben Schätzung und Gesamtzeit laut Jira. Gruppieren nach Epic,
-Projekt oder Typ; ein Klick auf die Zeile zeigt die Worklogs.
+**Issues:** which issues received the most time in the range, and from whom? The bar shows the
+members' shares, next to it estimate and Jira total. Group by epic, project or type; a click on a
+row shows the worklogs.
 
-<img src="docs/screenshots/step-6-tickets.png" width="760" alt="Tickets: Zeit pro Ticket mit Anteilen der Mitglieder">
+<img src="docs/screenshots/step-6-issues.png" width="760" alt="Issues: time per issue with the members' shares">
 
-> 💡 **Soll-Stunden** ergeben sich aus dem Vollzeit-Wochenmuster (Einstellungen → Zeit & Darstellung,
-> Standard 8 h Mo–Fr) und den Wochenstunden des Mitglieds. Urlaub und Feiertage kennt YaTTAT nicht;
-> Soll und Saldo lassen sich ausblenden.
+> 💡 **Target hours** come from the full-time weekly pattern (Settings → Time & display, default
+> 8 h Mon–Fri) and the member's weekly hours. YaTTAT does not know holidays and vacation; targets
+> and balances can be hidden.
 >
-> 🔁 **Zeiten erscheinen nicht?** Der Zeitraum wurde vielleicht schon geladen, bevor die Zeiten gebucht
-> wurden. „Aktualisieren“ holt den angezeigten Zeitraum neu; die automatische Aktualisierung
-> (Standard alle 30 Minuten) macht das von selbst.
+> 🔁 **Times do not appear?** The range may have been loaded before the times were booked. "Refresh"
+> reloads the displayed range; the automatic refresh (default every 30 minutes) does that by itself.
 >
-> 🧭 **Nur einzelne Mitglieder haben Zeiten?** Meldet die Kopfzeile „Worklogs anderer Autoren gefunden“,
-> führt Jira die Zeiten unter einem anderen Konto (typisch: „Tempo Timesheets“). Dann unter
-> Einstellungen → Verbindung die Quelle **Tempo Cloud** wählen. Einstellungen → Info zeigt die Details
-> des letzten Abrufs.
+> 🧭 **Only some members have times?** If the top bar reports "Worklogs by other authors found",
+> Jira lists the times under another account (typically "Tempo Timesheets"). Then choose the source
+> **Tempo Cloud** under Settings → Connection. Settings → About shows the details of the last fetch.
 >
-> ✅ **Sicher sein, dass nichts fehlt?** Einstellungen → Verbindung → **Quellen-Abgleich** liest den
-> angezeigten Zeitraum aus beiden Quellen und zeigt je Mitglied und Tag, wo Jira und Tempo
-> voneinander abweichen. Zeiten gehen nur verloren, wenn eine Quelle sie nicht sieht (Autor, Rechte),
-> der Projektfilter sie ausschließt oder der Cache veraltet ist; Abbrüche markieren nie Tage als geladen.
+> ✅ **Want to be sure nothing is missing?** Settings → Connection → **Source comparison** reads the
+> displayed range from both sources and shows per member and day where Jira and Tempo differ. Times
+> are only lost when a source cannot see them (author, permissions), the project filter excludes
+> them or the cache is stale; failed fetches never mark days as loaded.
 
-## Entwicklung
+## Development
 
-Voraussetzungen: Rust (stable), Node.js 20+, plattformabhängige
-[Tauri-Voraussetzungen](https://tauri.app/start/prerequisites/).
+Prerequisites: Rust (stable), Node.js 20+, the platform-specific
+[Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 ```bash
 npm install
@@ -146,18 +144,18 @@ npm install
 npm run tauri dev
 ```
 
-Die Oberfläche lässt sich auch ohne Tauri im Browser entwickeln (Mock-Backend mit Beispieldaten,
-zwei Teams, deterministische Worklogs der letzten 200 Tage):
+The interface can also be developed without Tauri in a browser (mock backend with sample data: two
+teams, deterministic worklogs for the last 200 days):
 
 ```bash
 npm run dev
 ```
 
-Im Mock öffnen `?view=team|member|tickets|settings` und `?tab=team` eine Ansicht direkt. Die
-Screenshots in `docs/screenshots/` entstehen daraus mit `scripts/screenshots.sh` (macOS,
-WebKit-Snapshot in Retina-Auflösung).
+In the mock, `?view=team|member|tickets|settings`, `?tab=team` and `?lang=de|en` open a view
+directly. The screenshots in `docs/screenshots/` are produced from it with `scripts/screenshots.sh`
+(macOS, WebKit snapshot in Retina resolution).
 
-Tests und Prüfungen:
+Tests and checks:
 
 ```bash
 cargo test -p yattat-core
@@ -167,34 +165,34 @@ cargo test -p yattat-core
 npm run check
 ```
 
-Release-Build:
+Release build:
 
 ```bash
 npm run tauri build
 ```
 
-## Projektstruktur
+## Project structure
 
 ```
-crates/yattat-core  Fachlogik ohne Tauri: Jira-Client (lesend), SQLite-Cache, Abruf, Statistik, Export, Secrets
-src-tauri           Tauri-App: Commands, Login-Fenster, Abruf-Jobs, Auto-Aktualisierung
-src                 Svelte-Frontend (Views, Komponenten, Store, Mock-Backend)
-docs                Architektur, Jira-Zugriff, Release
-.github/workflows   CI (Tests auf drei Plattformen) und Release (tauri-action)
+crates/yattat-core  Business logic without Tauri: Jira client (read-only), Tempo client, SQLite cache, fetch, statistics, export, secrets, i18n
+src-tauri           Tauri app: commands, login window, fetch jobs, automatic refresh
+src                 Svelte frontend (views, components, store, dictionary, mock backend)
+docs                Architecture, Jira access, release
+.github/workflows   CI (tests on three platforms) and release (tauri-action)
 ```
 
-Weitere Dokumentation: [Architektur](docs/ARCHITECTURE.md), [Jira-Zugriff](docs/JIRA_AUTH.md),
-[Release](docs/RELEASE.md), [Änderungen](CHANGELOG.md).
+Further documentation: [Architecture](docs/ARCHITECTURE.md), [Jira access](docs/JIRA_AUTH.md),
+[Release](docs/RELEASE.md), [Changelog](CHANGELOG.md).
 
-## Datenablage
+## Data locations
 
-| Was | macOS | Windows | Linux |
+| What | macOS | Windows | Linux |
 |---|---|---|---|
-| Einstellungen (Teams, Mitglieder), verschlüsselte Zugangsdaten | `~/Library/Application Support/YaTTAT` | `%APPDATA%\YaTTAT` | `~/.config/YaTTAT` |
-| Cache (`yattat-cache.sqlite`), Logs | `~/Library/Application Support/YaTTAT` | `%APPDATA%\YaTTAT` | `~/.local/share/YaTTAT` |
+| Settings (teams, members), encrypted credentials | `~/Library/Application Support/YaTTAT` | `%APPDATA%\YaTTAT` | `~/.config/YaTTAT` |
+| Cache (`yattat-cache.sqlite`), logs | `~/Library/Application Support/YaTTAT` | `%APPDATA%\YaTTAT` | `~/.local/share/YaTTAT` |
 
-Der Cache enthält nur, was auch in Jira sichtbar ist; „Cache leeren“ in den Einstellungen entfernt ihn.
+The cache only contains what is visible in Jira anyway; "Clear cache" in the settings removes it.
 
-## Lizenz
+## License
 
 MIT

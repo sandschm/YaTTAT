@@ -1,53 +1,53 @@
-# Release-Prozess
+# Release process
 
 ## Pipelines
 
-- **CI** (`.github/workflows/ci.yml`): bei jedem Push/PR auf drei Plattformen `cargo fmt --check`,
+- **CI** (`.github/workflows/ci.yml`): on every push/PR on three platforms `cargo fmt --check`,
   `cargo test -p yattat-core`, `cargo clippy`, `npm run check`, `npm run build`, `cargo clippy -p yattat`.
-- **Release** (`.github/workflows/release.yml`): bei einem Tag `v*` (oder manuell) baut
-  `tauri-apps/tauri-action` die Installationspakete und legt einen **Release-Entwurf** an:
-  - macOS: universelles `.dmg` (Apple Silicon + Intel)
-  - Windows: `.msi` (WiX) und `-setup.exe` (NSIS, Installation pro Benutzer)
+- **Release** (`.github/workflows/release.yml`): on a tag `v*` (or manually)
+  `tauri-apps/tauri-action` builds the installers and creates a **release draft**:
+  - macOS: universal `.dmg` (Apple Silicon + Intel)
+  - Windows: `.msi` (WiX) and `-setup.exe` (NSIS, per-user install)
   - Linux: `.deb`, `.rpm`, `.AppImage`
 
-## Version erhöhen und veröffentlichen
+## Bump the version and publish
 
-1. Version in `package.json` setzen (die Tauri-Konfiguration liest sie von dort) und in
-   `Cargo.toml` (`[workspace.package] version`) angleichen; `Cargo.lock` wird beim nächsten Build
-   aktualisiert (`cargo check`).
-2. Eintrag in `CHANGELOG.md` ergänzen.
-3. Änderungen committen, Tag setzen und pushen:
+1. Set the version in `package.json` (the Tauri configuration reads it from there) and in
+   `Cargo.toml` (`[workspace.package] version`); `Cargo.lock` is updated by the next build
+   (`cargo check`).
+2. Add an entry to `CHANGELOG.md`.
+3. Commit, tag and push:
 
 ```bash
-git tag v0.1.0 && git push origin main --tags
+git tag v0.4.0 && git push origin main --tags
 ```
 
-4. Nach dem Lauf den Release-Entwurf unter „Releases“ prüfen und veröffentlichen.
+4. After the run, check the draft under "Releases" and publish it.
 
-## Signierung (optional, empfohlen)
+## Signing (optional, recommended)
 
-Ohne Signatur blockiert macOS Gatekeeper den ersten Start (Rechtsklick → Öffnen bzw.
-`xattr -dr com.apple.quarantine`), Windows SmartScreen warnt. Für signierte Builds folgende
-Repository-Secrets setzen:
+Without a signature macOS Gatekeeper blocks the first start (right-click → Open or
+`xattr -dr com.apple.quarantine`), Windows SmartScreen warns. For signed builds set the following
+repository secrets:
 
-| Secret | Bedeutung |
+| Secret | Meaning |
 |---|---|
-| `APPLE_CERTIFICATE` | Developer-ID-Application-Zertifikat als Base64 (`.p12`) |
-| `APPLE_CERTIFICATE_PASSWORD` | Passwort der `.p12` |
-| `APPLE_SIGNING_IDENTITY` | z. B. `Developer ID Application: Firma (TEAMID)` |
-| `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | Für die Notarisierung (App-spezifisches Passwort) |
-| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Nur nötig, wenn das Updater-Plugin aktiviert wird |
+| `APPLE_CERTIFICATE` | Developer ID Application certificate as Base64 (`.p12`) |
+| `APPLE_CERTIFICATE_PASSWORD` | Password of the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Company (TEAMID)` |
+| `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | For notarisation (app-specific password) |
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Only needed when the updater plugin is enabled |
 
-Windows-Code-Signing lässt sich über `bundle.windows.certificateThumbprint` in
-`src-tauri/tauri.conf.json` und ein im Runner installiertes Zertifikat ergänzen.
+Windows code signing can be added through `bundle.windows.certificateThumbprint` in
+`src-tauri/tauri.conf.json` and a certificate installed on the runner.
 
-Die Signatur-Variablen werden im Workflow nur exportiert, wenn die Secrets gesetzt sind; ein leerer
-`APPLE_CERTIFICATE`-Wert ließe den macOS-Build sonst beim Signieren scheitern.
+The signing variables are only exported in the workflow when the secrets are set; an empty
+`APPLE_CERTIFICATE` would otherwise make the macOS build fail at the signing step.
 
-## Lokaler Build
+## Local build
 
 ```bash
 npm run tauri build
 ```
 
-Die Pakete liegen danach unter `target/release/bundle/`.
+The packages end up under `target/release/bundle/`.

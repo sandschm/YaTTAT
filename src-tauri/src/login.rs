@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use yattat_core::i18n::{t, tf};
 use yattat_core::jira::JiraClient;
 use yattat_core::models::*;
 
@@ -40,7 +41,7 @@ fn to_stored(c: &tauri::webview::Cookie<'_>) -> StoredCookie {
 /// Opens the login window and resolves once the session works or the window is closed.
 pub async fn browser_login(app: AppHandle, state: Arc<AppState>) -> Result<AuthStatus, String> {
     if state.login_in_progress.swap(true, Ordering::SeqCst) {
-        return Err("Eine Anmeldung läuft bereits".into());
+        return Err(t(state.lang(), "loginRunning").into());
     }
     let result = browser_login_inner(&app, &state).await;
     state.login_in_progress.store(false, Ordering::SeqCst);
@@ -52,11 +53,12 @@ pub async fn browser_login(app: AppHandle, state: Arc<AppState>) -> Result<AuthS
 
 async fn browser_login_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<AuthStatus, String> {
     let settings = state.settings();
+    let lang = settings.lang();
     let base = settings.jira_base();
     if base.is_empty() {
-        return Err("Bitte zuerst die Jira-URL eintragen".into());
+        return Err(t(lang, "noJiraUrl").into());
     }
-    let base_url = Url::parse(&base).map_err(|e| format!("Ungültige Jira-URL: {e}"))?;
+    let base_url = Url::parse(&base).map_err(|e| tf(lang, "invalidJiraUrl", &[&e.to_string()]))?;
     // `login.jsp` exists on Data Center and redirects to Atlassian ID on Cloud. The destination is
     // the site root so that no instance-specific page can 404 after the login.
     let login_url =
@@ -67,19 +69,19 @@ async fn browser_login_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<A
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     let window = WebviewWindowBuilder::new(app, LOGIN_WINDOW, WebviewUrl::External(login_url))
-        .title("Bei Jira anmelden")
+        .title(t(lang, "loginWindowTitle"))
         .inner_size(560.0, 760.0)
         .min_inner_size(420.0, 520.0)
         .center()
         .user_agent(DESKTOP_UA)
         .build()
-        .map_err(|e| format!("Login-Fenster konnte nicht geöffnet werden: {e}"))?;
+        .map_err(|e| tf(lang, "loginWindowFailed", &[&e.to_string()]))?;
     let _ = window.set_focus();
     emit(app, "login-window", "opened");
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15 * 60);
     let mut last_fingerprint: Option<String> = None;
-    let mut last_result = String::from("Warte auf Anmeldung im Fenster …");
+    let mut last_result = t(lang, "waitingForLogin").to_string();
     let mut ticks: u32 = 0;
     emit(app, "login-progress", last_result.clone());
     loop {
@@ -87,14 +89,10 @@ async fn browser_login_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<A
         ticks += 1;
         if app.get_webview_window(LOGIN_WINDOW).is_none() {
             emit(app, "login-window", "closed");
-            return Err(format!(
-                "Anmeldung abgebrochen. Letzte Prüfung: {last_result}"
-            ));
+            return Err(tf(lang, "loginCancelled", &[&last_result]));
         }
         if tokio::time::Instant::now() > deadline {
-            return Err(format!(
-                "Zeitüberschreitung bei der Anmeldung. Letzte Prüfung: {last_result}"
-            ));
+            return Err(tf(lang, "loginTimeout", &[&last_result]));
         }
         let cookies = match window.cookies_for_url(base_url.clone()) {
             Ok(c) => c.iter().map(to_stored).collect::<Vec<_>>(),
@@ -132,7 +130,7 @@ async fn browser_login_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<A
             Deployment::Unknown,
         ) {
             Ok(c) => c,
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(e.localized(lang)),
         };
         let session_cookies: Vec<&str> = names
             .iter()
@@ -153,23 +151,27 @@ async fn browser_login_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<A
                 emit(
                     app,
                     "login-progress",
-                    format!("Sitzung erkannt: {}", user.display_name),
+                    tf(lang, "sessionDetected", &[&user.display_name]),
                 );
                 let status = install_client(app, state, Credential::Cookies { cookies }).await?;
                 return Ok(status);
             }
             Err(yattat_core::Error::AuthExpired(code)) => {
                 last_result = if session_cookies.is_empty() {
-                    format!("noch keine Sitzung (HTTP {code})")
+                    tf(lang, "noSessionYet", &[&code.to_string()])
                 } else {
-                    format!("Sitzungs-Cookies vorhanden ({}), Jira akzeptiert sie noch nicht (HTTP {code})", session_cookies.join(", "))
+                    tf(
+                        lang,
+                        "cookiesNotAccepted",
+                        &[&session_cookies.join(", "), &code.to_string()],
+                    )
                 };
             }
             Err(yattat_core::Error::Http { status: 404, .. }) => {
-                last_result = format!("{base}/rest/api/2/myself antwortet 404 – die Jira-URL ist vermutlich falsch (bei Jira Cloud nur https://<firma>.atlassian.net)");
+                last_result = tf(lang, "myself404", &[&base]);
             }
             Err(e) => {
-                last_result = format!("Prüfung fehlgeschlagen: {e}");
+                last_result = tf(lang, "probeFailed", &[&e.localized(lang)]);
             }
         }
         tracing::debug!("probe result: {last_result}");
@@ -183,7 +185,7 @@ pub fn logout(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
     let base = settings.jira_base();
     if !base.is_empty() {
         yattat_core::secrets::delete_credential(state.secrets.as_ref(), &base)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| state.l(&e))?;
     }
     state.clear_session(None);
     if let Some(w) = app.get_webview_window(LOGIN_WINDOW) {

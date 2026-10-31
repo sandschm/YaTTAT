@@ -1,6 +1,7 @@
 //! CSV/JSON export of worklogs, optionally summarized per day, member and ticket.
 
 use crate::error::Result;
+use crate::i18n::Lang;
 use crate::models::{Issue, Member, Worklog};
 use crate::settings::TimeFormat;
 use chrono::{DateTime, FixedOffset, NaiveDate};
@@ -103,33 +104,56 @@ pub fn summarize_rows(rows: &[ExportRow]) -> Vec<ExportRow> {
     out
 }
 
-pub fn to_csv(rows: &[ExportRow], format: TimeFormat) -> Result<String> {
+/// CSV with a semicolon delimiter and a BOM (Excel), headers and date format by language.
+pub fn to_csv(rows: &[ExportRow], format: TimeFormat, lang: Lang) -> Result<String> {
     let mut wtr = csv::WriterBuilder::new()
         .delimiter(b';')
         .from_writer(vec![]);
-    wtr.write_record([
-        "Datum",
-        "Beginn",
-        "Mitglied",
-        "Projekt",
-        "Ticket",
-        "Titel",
-        "Typ",
-        "Dauer",
-        "Dauer (Sekunden)",
-        "Kommentar",
-        "Worklog-IDs",
-    ])?;
+    let (headers, date_format): ([&str; 11], &str) = match lang {
+        Lang::De => (
+            [
+                "Datum",
+                "Beginn",
+                "Mitglied",
+                "Projekt",
+                "Ticket",
+                "Titel",
+                "Typ",
+                "Dauer",
+                "Dauer (Sekunden)",
+                "Kommentar",
+                "Worklog-IDs",
+            ],
+            "%d.%m.%Y",
+        ),
+        Lang::En => (
+            [
+                "Date",
+                "Start",
+                "Member",
+                "Project",
+                "Issue",
+                "Summary",
+                "Type",
+                "Duration",
+                "Duration (seconds)",
+                "Comment",
+                "Worklog IDs",
+            ],
+            "%Y-%m-%d",
+        ),
+    };
+    wtr.write_record(headers)?;
     for r in rows {
         wtr.write_record([
-            r.date.format("%d.%m.%Y").to_string(),
+            r.date.format(date_format).to_string(),
             r.started.format("%H:%M").to_string(),
             r.member.clone(),
             r.project_key.clone(),
             r.issue_key.clone(),
             r.summary.clone(),
             r.issue_type.clone(),
-            crate::format_duration(r.seconds, format),
+            crate::format_duration(r.seconds, format, lang),
             r.seconds.to_string(),
             r.comment.replace(['\n', '\r'], " "),
             r.worklog_ids.join(","),
@@ -234,10 +258,15 @@ mod tests {
         assert_eq!(alice.comment, "first\nline | later");
         assert_eq!(alice.worklog_ids, vec!["1", "2"]);
         assert_eq!(alice.started.format("%H:%M").to_string(), "09:00");
-        let csv = to_csv(&summary, TimeFormat::HoursMinutes).unwrap();
-        assert!(csv.starts_with('\u{feff}'));
+        let csv = to_csv(&summary, TimeFormat::HoursMinutes, Lang::De).unwrap();
+        assert!(csv.starts_with("\u{feff}Datum;"));
         assert!(csv.contains("\"Semi;colon\""));
         assert!(csv.contains(";1:30;5400;first line | later;"));
+        assert!(csv.contains("05.10.2026;"));
+        let csv_en = to_csv(&summary, TimeFormat::Decimal, Lang::En).unwrap();
+        assert!(csv_en.starts_with("\u{feff}Date;"));
+        assert!(csv_en.contains("2026-10-05;"));
+        assert!(csv_en.contains(";1.50;5400;"));
         let json = to_json(&rows).unwrap();
         assert!(json.contains("\"issueKey\": \"A-1\""));
     }

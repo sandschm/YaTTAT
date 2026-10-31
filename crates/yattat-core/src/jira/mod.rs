@@ -272,7 +272,7 @@ impl JiraClient {
 
     pub async fn myself(&self) -> Result<JiraUser> {
         let v = self.get_json("rest/api/2/myself", &[]).await?;
-        parse::parse_user(&v).ok_or_else(|| Error::Parse("Benutzerantwort unvollständig".into()))
+        parse::parse_user(&v).ok_or(Error::IncompleteUser)
     }
 
     /// Checks the credentials and detects the deployment type.
@@ -466,8 +466,7 @@ impl JiraClient {
                 &[("fields", ids.search_fields())],
             )
             .await?;
-        parse::parse_issue(&v, &ids)
-            .ok_or_else(|| Error::Parse(format!("Ticket {key} konnte nicht gelesen werden")))
+        parse::parse_issue(&v, &ids).ok_or_else(|| Error::IssueUnreadable(key.to_string()))
     }
 
     /// Issue by key or numeric id; `None` when it does not exist or is not visible.
@@ -534,7 +533,7 @@ impl JiraClient {
             .await?;
         let status = resp.status();
         if status == StatusCode::UNAUTHORIZED {
-            return Err(Error::Invalid("Benutzername oder Passwort falsch".into()));
+            return Err(Error::WrongCredentials);
         }
         if status == StatusCode::FORBIDDEN {
             let reason = resp
@@ -543,17 +542,12 @@ impl JiraClient {
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
             if reason.contains("AUTHENTICATION_DENIED") {
-                return Err(Error::Invalid(
-                    "Jira verlangt ein CAPTCHA. Bitte einmal im Browser anmelden oder die Browser-Anmeldung verwenden.".into(),
-                ));
+                return Err(Error::CaptchaRequired);
             }
             return Err(Error::AuthExpired(403));
         }
         if !status.is_success() {
-            return Err(Error::Http {
-                status: status.as_u16(),
-                message: "Anmeldung fehlgeschlagen".into(),
-            });
+            return Err(Error::LoginFailed(status.as_u16()));
         }
         let mut cookies = Vec::new();
         for header in resp.headers().get_all(reqwest::header::SET_COOKIE) {
@@ -591,7 +585,7 @@ impl JiraClient {
             }
         }
         if cookies.is_empty() {
-            return Err(Error::Parse("Keine Session-Cookies in der Antwort".into()));
+            return Err(Error::NoSessionCookies);
         }
         Ok(cookies)
     }

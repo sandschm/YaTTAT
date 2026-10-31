@@ -2,6 +2,7 @@
 //! Secrets never live here, they go to [`crate::secrets`].
 
 use crate::error::{Error, Result};
+use crate::i18n::{Lang, Language};
 use crate::models::{Member, Team};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -155,6 +156,7 @@ pub enum Theme {
 #[serde(rename_all = "camelCase", default)]
 pub struct BehaviorSettings {
     pub theme: Theme,
+    pub language: Language,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -178,27 +180,27 @@ impl Settings {
             normalize_jira_url(&self.jira.base_url)?;
         }
         if self.refresh.interval_minutes == 0 && self.refresh.auto {
-            return Err(Error::Invalid(
-                "Aktualisierungsintervall muss mindestens 1 Minute sein".into(),
-            ));
+            return Err(Error::IntervalTooSmall);
         }
         if self.tempo.source == WorklogSource::TempoCloud {
             url::Url::parse(self.tempo.cloud_api_base.trim())
-                .map_err(|_| Error::Invalid("Tempo-API-Basis ist keine gültige URL".into()))?;
+                .map_err(|_| Error::InvalidTempoBase)?;
         }
         for t in &self.teams {
             for m in &t.members {
                 if let Some(h) = m.weekly_hours {
                     if !(0.0..=80.0).contains(&h) {
-                        return Err(Error::Invalid(format!(
-                            "Wochenstunden von {} müssen zwischen 0 und 80 liegen",
-                            m.display_name
-                        )));
+                        return Err(Error::WeeklyHoursOutOfRange(m.display_name.clone()));
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    /// The language for messages, with `System` resolved.
+    pub fn lang(&self) -> Lang {
+        self.behavior.language.resolve()
     }
 
     /// Normalized base URL without trailing slash (see [`normalize_jira_url`]).
@@ -318,12 +320,9 @@ pub fn normalize_jira_url(input: &str) -> Result<String> {
     };
     let mut url = url::Url::parse(&with_scheme)?;
     if url.scheme() != "https" && url.scheme() != "http" {
-        return Err(Error::InvalidUrl("Nur http(s) wird unterstützt".into()));
+        return Err(Error::UnsupportedScheme);
     }
-    let host = url
-        .host_str()
-        .ok_or_else(|| Error::InvalidUrl("Kein Host in der URL".into()))?
-        .to_lowercase();
+    let host = url.host_str().ok_or(Error::NoHost)?.to_lowercase();
     url.set_query(None);
     url.set_fragment(None);
     let is_cloud = host.ends_with(".atlassian.net") || host.ends_with(".jira.com");
@@ -363,11 +362,9 @@ pub struct AppPaths {
 impl AppPaths {
     pub fn discover() -> Result<Self> {
         let config_dir = dirs::config_dir()
-            .ok_or_else(|| Error::Io("Kein Konfigurationsverzeichnis gefunden".into()))?
+            .ok_or(Error::NoConfigDir)?
             .join(APP_DIR_NAME);
-        let data_dir = dirs::data_dir()
-            .ok_or_else(|| Error::Io("Kein Datenverzeichnis gefunden".into()))?
-            .join(APP_DIR_NAME);
+        let data_dir = dirs::data_dir().ok_or(Error::NoDataDir)?.join(APP_DIR_NAME);
         Ok(Self {
             config_dir,
             data_dir,
@@ -560,6 +557,7 @@ mod tests {
         assert_eq!(s.refresh.interval_minutes, 30);
         assert!(s.teams.is_empty());
         assert_eq!(s.tempo.source, WorklogSource::JiraWorklogs);
+        assert_eq!(s.behavior.language, Language::System);
         assert_eq!(s.tempo.cloud_api_base, "https://api.tempo.io/4");
         assert_eq!(s.work.pattern_hours_per_week(), 40.0);
     }

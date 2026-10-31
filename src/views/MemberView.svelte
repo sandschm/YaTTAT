@@ -1,7 +1,8 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte";
   import { api, isTauri, openExternal, type ExportRow, type Stats } from "../lib/api";
-  import { formatDate, formatDuration, formatHours, formatSigned, formatTime, isoWeek, parseDate, startOfWeek, toDateKey } from "../lib/format";
+  import { formatDate, formatDuration, formatHours, formatShortDate, formatSigned, formatTime, isoWeek, parseDate, startOfWeek, toDateKey } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
   import BarChart, { type Bar } from "../components/BarChart.svelte";
   import HBars, { type Row } from "../components/HBars.svelte";
   import Donut from "../components/Donut.svelte";
@@ -57,7 +58,7 @@
     for (const d of stats.days) {
       const ws = startOfWeek(parseDate(d.date), store.firstDay);
       const k = toDateKey(ws);
-      const w = weeks.get(k) ?? { label: `KW ${isoWeek(ws)}`, full: `Woche ab ${formatDate(ws, { day: "2-digit", month: "2-digit" })}`, segments: [{ key: "m", label: member!.displayName, color, seconds: 0 }], target: 0 };
+      const w = weeks.get(k) ?? { label: t("chart.week", { n: isoWeek(ws) }), full: t("chart.weekFrom", { d: formatDate(ws, { day: "2-digit", month: "2-digit" }) }), segments: [{ key: "m", label: member!.displayName, color, seconds: 0 }], target: 0 };
       w.segments[0].seconds += d.seconds;
       w.target = (w.target ?? 0) + d.targetSeconds;
       weeks.set(k, w);
@@ -105,7 +106,7 @@
         const path = await save({ defaultPath: name, filters: [{ name: format.toUpperCase(), extensions: [format] }] });
         if (!path) return;
         const n = await api.exportWorklogs(store.range.from, store.range.to, [member.id], format, summarize, path);
-        store.toast(`${n} Zeilen exportiert`, "success");
+        store.toast(t("export.rows", { n }), "success");
       } else {
         const content = format === "json" ? JSON.stringify(rows, null, 2) : rowsToCsv(rows);
         const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
@@ -123,10 +124,10 @@
   }
 
   function rowsToCsv(list: ExportRow[]): string {
-    const head = ["Datum", "Beginn", "Mitglied", "Projekt", "Ticket", "Titel", "Typ", "Dauer", "Dauer (Sekunden)", "Kommentar", "Worklog-IDs"];
+    const head = [t("csv.date"), t("csv.start"), t("csv.member"), t("csv.project"), t("csv.issue"), t("csv.summary"), t("csv.type"), t("csv.duration"), t("csv.durationSeconds"), t("csv.comment"), t("csv.worklogIds")];
     const esc = (v: string) => (/[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const lines = list.map((r) =>
-      [formatDate(r.date, { day: "2-digit", month: "2-digit", year: "numeric" }), formatTime(r.started), r.member, r.projectKey, r.issueKey, r.summary, r.issueType, formatDuration(r.seconds, tf), String(r.seconds), r.comment.replace(/\r?\n/g, " "), r.worklogIds.join(",")]
+      [formatShortDate(r.date), formatTime(r.started), r.member, r.projectKey, r.issueKey, r.summary, r.issueType, formatDuration(r.seconds, tf), String(r.seconds), r.comment.replace(/\r?\n/g, " "), r.worklogIds.join(",")]
         .map(esc)
         .join(";"),
     );
@@ -136,7 +137,7 @@
 
 <div class="view">
   <div class="view-header">
-    <h1>Mitglied</h1>
+    <h1>{t("member.title")}</h1>
     <div class="members">
       {#each store.members as m (m.id)}
         <button type="button" class="member-chip" class:on={member?.id === m.id} onclick={() => { store.memberId = m.id; store.persist(); }} style="--c:{m.color ?? store.memberColor(m.id)}">
@@ -149,61 +150,61 @@
   </div>
   <div class="view-body">
     {#if !member}
-      <p class="muted">Keine Mitglieder im Team. Lege sie unter Einstellungen → Team & Mitglieder an.</p>
+      <p class="muted">{t("member.noMembers")}</p>
     {:else if stats && me}
       <div class="kpis">
         <div class="kpi card">
-          <span class="label">Erfasst</span>
+          <span class="label">{t("kpi.logged")}</span>
           <span class="value mono">{formatHours(me.seconds, tf)}</span>
-          <span class="sub faint">{me.worklogCount} Worklogs an {me.daysLogged} Tagen</span>
+          <span class="sub faint">{t("kpi.worklogsOnDays", { n: me.worklogCount, d: me.daysLogged })}</span>
         </div>
         {#if showTargets}
           <div class="kpi card">
-            <span class="label">Soll</span>
+            <span class="label">{t("kpi.target")}</span>
             <span class="value mono">{formatHours(me.targetSeconds, tf)}</span>
-            <span class="sub faint">{member.weeklyHours != null ? `${member.weeklyHours} h/Woche` : "Vollzeit-Muster"}</span>
+            <span class="sub faint">{member.weeklyHours != null ? t("kpi.weeklyHours", { h: member.weeklyHours }) : t("kpi.fullTimePattern")}</span>
           </div>
           <div class="kpi card" class:pos={balance >= 0} class:neg={balance < 0}>
-            <span class="label">Saldo</span>
+            <span class="label">{t("kpi.balance")}</span>
             <span class="value mono">{formatSigned(balance, tf)}</span>
-            <span class="sub faint">{balance >= 0 ? "über Soll" : "unter Soll"}</span>
+            <span class="sub faint">{t(balance >= 0 ? "kpi.aboveTarget" : "kpi.belowTarget")}</span>
           </div>
         {/if}
         <div class="kpi card">
-          <span class="label">Ø pro Tag</span>
+          <span class="label">{t("kpi.avgPerDay")}</span>
           <span class="value mono">{formatHours(me.avgPerLoggedDaySeconds, tf)}</span>
-          <span class="sub faint">an Tagen mit Buchungen</span>
+          <span class="sub faint">{t("kpi.onDaysWithLogs")}</span>
         </div>
         <div class="kpi card">
-          <span class="label">Tickets</span>
+          <span class="label">{t("kpi.issues")}</span>
           <span class="value mono">{me.issueCount}</span>
-          <span class="sub faint">{me.byProject.length} {me.byProject.length === 1 ? "Projekt" : "Projekte"}</span>
+          <span class="sub faint">{t(me.byProject.length === 1 ? "kpi.project1" : "kpi.projectN", { n: me.byProject.length })}</span>
         </div>
       </div>
 
       <div class="grid">
         <section class="card panel wide">
-          <h3>Stunden pro {bars.length === stats.days.length ? "Tag" : "Woche"}</h3>
+          <h3>{t(bars.length === stats.days.length ? "member.hoursPerDay" : "member.hoursPerWeek")}</h3>
           <BarChart {bars} {showTargets} />
         </section>
         <section class="card panel">
-          <h3>Verteilung nach Projekt</h3>
+          <h3>{t("team.byProject")}</h3>
           <Donut slices={me.byProject.map((p) => ({ key: p.key, label: `${p.key} · ${p.label}`, seconds: p.seconds, color: p.color ?? store.projectColor(p.key) }))} />
         </section>
         <section class="card panel">
-          <h3>Top-Tickets</h3>
+          <h3>{t("member.topIssues")}</h3>
           <HBars rows={issueRows} labelWidth={220} onselect={(r) => openIssue(r.key)} />
         </section>
         <section class="card panel wide">
           <div class="row head">
-            <h3>Worklogs</h3>
+            <h3>{t("member.worklogs")}</h3>
             <span class="grow"></span>
-            <label class="check" style="margin:0"><input type="checkbox" bind:checked={summarize} /><span>Pro Tag und Ticket zusammenfassen</span></label>
+            <label class="check" style="margin:0"><input type="checkbox" bind:checked={summarize} /><span>{t("member.summarize")}</span></label>
             <button class="btn sm" type="button" onclick={() => exportFile("csv")} disabled={exporting || !rows.length}><Icon name="download" size={14} /> CSV</button>
             <button class="btn sm" type="button" onclick={() => exportFile("json")} disabled={exporting || !rows.length}><Icon name="download" size={14} /> JSON</button>
           </div>
           {#if !days.length}
-            <p class="faint">Keine Worklogs im Zeitraum.</p>
+            <p class="faint">{t("member.noWorklogs")}</p>
           {/if}
           {#each days as d (d.date)}
             {@const open = openDays[d.date] ?? days.length <= 12}
@@ -211,7 +212,7 @@
               <button type="button" class="day-head" onclick={() => (openDays = { ...openDays, [d.date]: !open })}>
                 <span class="chev" class:open><Icon name="chevronRight" size={14} /></span>
                 <span class="day-date">{formatDate(d.date)}</span>
-                <span class="faint">{d.rows.length} {d.rows.length === 1 ? "Eintrag" : "Einträge"}</span>
+                <span class="faint">{t(d.rows.length === 1 ? "member.entries1" : "member.entriesN", { n: d.rows.length })}</span>
                 <span class="grow"></span>
                 <span class="mono">{formatHours(d.seconds, tf)}</span>
               </button>
@@ -235,7 +236,7 @@
         </section>
       </div>
     {:else}
-      <p class="faint">Lade …</p>
+      <p class="faint">{t("common.loading")}</p>
     {/if}
   </div>
 </div>

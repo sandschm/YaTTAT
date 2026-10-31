@@ -3,6 +3,7 @@
   import { formatHours, formatSigned } from "../lib/format";
   import { store } from "../lib/store.svelte";
   import Avatar from "./Avatar.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   export interface Row {
     key: string;
@@ -33,7 +34,7 @@
         <span class="track">
           <span class="fill" style="width:{(r.seconds / max) * 100}%; background:{r.color}"></span>
           {#if showTargets && r.target}
-            <span class="target" style="left:{(r.target / max) * 100}%" title="Soll {formatHours(r.target, tf)}"></span>
+            <span class="target" style="left:{(r.target / max) * 100}%" title={t("chart.target") + " " + formatHours(r.target, tf)}></span>
           {/if}
         </span>
         <span class="value mono">{formatHours(r.seconds, tf)}</span>
@@ -43,7 +44,7 @@
       </button>
     </li>
   {/each}
-  {#if !rows.length}<li class="faint">Keine Zeiten im Zeitraum.</li>{/if}
+  {#if !rows.length}<li class="faint">{t("chart.noTimes")}</li>{/if}
 </ul>
 
 <style>

@@ -2,6 +2,7 @@
   // Vertical bars with optional stacked segments and a dashed target line per bar. Pure SVG.
   import { formatHours } from "../lib/format";
   import { store } from "../lib/store.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   export interface Segment {
     key: string;
@@ -36,7 +37,7 @@
 </script>
 
 <div class="wrap" bind:clientWidth={width}>
-  <svg viewBox="0 0 {width} {height}" {width} {height} role="img" aria-label="Balkendiagramm">
+  <svg viewBox="0 0 {width} {height}" {width} {height} role="img" aria-label={t("chart.bar")}>
     {#each ticks as t (t)}
       {@const y = plotH - (t / max) * plotH}
       <line x1="30" x2={width} y1={y} y2={y} stroke="var(--border)" stroke-dasharray="2 3" />
@@ -48,7 +49,7 @@
       {@const total = b.segments.reduce((a, s) => a + s.seconds, 0)}
       <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
       <g onclick={() => onselect?.(i)} style:cursor={onselect ? "pointer" : "default"} opacity={b.muted ? 0.45 : 1}>
-        <title>{b.full}: {formatHours(total, tf)}{showTargets && b.target ? ` (Soll ${formatHours(b.target, tf)})` : ""}</title>
+        <title>{b.full}: {formatHours(total, tf)}{showTargets && b.target ? t("chart.targetTooltip", { t: formatHours(b.target, tf) }) : ""}</title>
         <rect x={x0} y="0" width={w} height={plotH} fill="transparent" />
         {#each b.segments as s, si (s.key)}
           {@const offset = b.segments.slice(0, si).reduce((a, q) => a + q.seconds, 0)}

@@ -1,51 +1,53 @@
-# Änderungen
+# Changelog
 
-## Unveröffentlicht
+## 0.4.0 – 2026-10-31
 
-- App-Icon in den Farben des YaTTT-Icons (Cyan und Gelb).
+- **English user interface.** Settings → Time & display → Language: System (automatic), Deutsch or
+  English. Covers the whole interface, dates and decimal separators, CSV headers and the messages
+  the backend sends (errors, login progress, status).
+- All documents in the repository (README, changelog, docs, release notes) are in English; the
+  screenshots show the English interface.
+- App icon in the colours of the YaTTT icon (cyan and yellow).
 
 ## 0.3.0 – 2026-10-31
 
-Vier Sicherungen gegen stille Lücken in den Zeiten:
+Four safeguards against silent gaps in the times:
 
-- **Quellen-Abgleich** (Einstellungen → Verbindung): liest den angezeigten Zeitraum aus Jira und
-  Tempo und stellt beide je Mitglied und Tag gegenüber, inklusive der Worklogs, die Jira anderen
-  Autoren zuordnet, und der Tempo-Worklogs auf nicht lesbaren Tickets. Der Cache bleibt unverändert.
-- **Stand** in der Kopfzeile zeigt jetzt den ältesten Abruf im Zeitraum statt des jüngsten. Ist er
-  älter als das doppelte Aktualisierungsintervall (mindestens eine Stunde), wird das als Warnung mit
-  „Aktualisieren empfohlen“ angezeigt; ein Klick lädt neu. Die automatische Aktualisierung richtet
-  sich ebenfalls nach dem Alter der geladenen Tage, sodass ein Zeitraum nach dem App-Start
-  nachgeladen wird, wenn er älter als das Intervall ist.
-- Wird der Zeitraum oder das Team gewechselt, während ein Abruf läuft, holt die App die neue
-  Ansicht nach dem laufenden Abruf automatisch nach (vorher blieb die Lücke bis zum nächsten Wechsel).
-- Mitglieder ohne Zeiten werden nach jedem Abruf namentlich genannt: bei der Jira-Quelle zusammen
-  mit den fremden Autoren, bei der Tempo-Quelle als Hinweis auf fehlende Buchungen oder fehlende
-  Token-Berechtigung.
+- **Source comparison** (Settings → Connection): reads the displayed range from Jira and Tempo and
+  compares both per member and day, including the worklogs Jira attributes to other authors and the
+  Tempo worklogs on unreadable issues. The cache is not changed.
+- **As of** in the top bar now shows the oldest fetch in the range instead of the newest. If it is
+  older than twice the refresh interval (at least one hour), it is shown as a warning with "refresh
+  recommended"; a click reloads. The automatic refresh also goes by the age of the loaded days, so a
+  range is reloaded after the app starts when it is older than the interval.
+- When the range or the team is changed while a fetch is running, the new view is fetched
+  automatically after the running fetch (before, the gap stayed until the next change).
+- Members without times are named after every fetch: with the Jira source together with the foreign
+  authors, with the Tempo source as a hint at missing bookings or missing token permission.
 
 ## 0.2.0 – 2026-10-31
 
-- **Tempo Cloud als Quelle der Zeiten** (Einstellungen → Verbindung → Quelle der Zeiten). Bucht das
-  Team in Tempo, führt Jira die Worklogs häufig unter dem Tempo-App-Konto; die Jira-API ordnet sie
-  dann keiner Person zu und YaTTAT fand nur die direkt in Jira gebuchten Zeiten. Mit einem
-  Tempo-API-Token liest YaTTAT die Worklogs jetzt aus der Tempo-API (echter Autor), löst die Tickets
-  über Jira auf und wertet wie gewohnt aus. Beim Wechsel der Quelle wird der Cache geleert.
-- Diagnose nach jedem Abruf: Worklogs im Zeitraum, die Jira anderen Autoren zuordnet (z. B. „Tempo
-  Timesheets“), erscheinen in der Kopfzeile als Hinweis und unter Einstellungen → Info. Tempo-Worklogs
-  auf in Jira nicht lesbaren Tickets werden gezählt.
-- Fehlendes Tempo-Token bei gewählter Tempo-Quelle wird in der Kopfzeile angezeigt.
+- **Tempo Cloud as source of times** (Settings → Connection → Source of times). If the team logs
+  time in Tempo, Jira often lists the worklogs under the Tempo app account; the Jira API then cannot
+  attribute them to a person and YaTTAT only found the times logged directly in Jira. With a Tempo
+  API token YaTTAT now reads the worklogs from the Tempo API (real author), resolves the issues
+  through Jira and analyses as usual. Switching the source clears the cache.
+- Diagnostics after every fetch: worklogs in the range that Jira attributes to other authors (e.g.
+  "Tempo Timesheets") appear as a hint in the top bar and under Settings → About. Tempo worklogs on
+  issues that cannot be read in Jira are counted.
+- A missing Tempo token with the Tempo source selected is reported in the top bar.
 
 ## 0.1.0 – 2026-10-31
 
-- Erste Version: Zeiterfassungen (Worklogs) der Teammitglieder aus Jira (Cloud und Data Center)
-  abrufen und auswerten. Anmeldung wie in YaTTT (Browser-Login mit SSO/2FA, Passwort, PAT, API-Token).
-- Einstellungen: Jira-Verbindung, optionale Projektauswahl, **Teams und Mitglieder** (Suche nach
-  Jira-Benutzern, Wochenstunden und Farbe je Mitglied, mehrere Teams), Soll-Arbeitszeit, Zeitformat,
-  Erscheinungsbild, automatische Aktualisierung.
-- Ansichten: Team (Kennzahlen, Stunden pro Mitglied mit Soll, Stunden pro Tag/Woche gestapelt nach
-  Mitglied, Verteilung nach Projekt, Tickettyp und Wochentag, Mitgliedertabelle), Mitglied
-  (Kennzahlen, Verlauf, Projekte, Top-Tickets, Worklog-Liste nach Tagen, CSV/JSON-Export),
-  Tickets (Zeit pro Ticket mit Anteilen der Mitglieder, Schätzung und Jira-Gesamt, Filter,
-  Gruppierung nach Epic/Projekt/Typ, Worklogs je Ticket).
-- Lokaler SQLite-Cache mit Tagesabdeckung je Mitglied: nur fehlende Tage werden aus Jira geladen,
-  „Aktualisieren“ lädt den angezeigten Zeitraum neu und entfernt gelöschte Worklogs.
-- CI auf drei Plattformen und Release-Pipeline mit Installationspaketen für macOS, Windows und Linux.
+- First version: fetch and analyse the time tracking (worklogs) of team members from Jira (Cloud
+  and Data Center). Login as in YaTTT (browser login with SSO/2FA, password, PAT, API token).
+- Settings: Jira connection, optional project selection, **teams and members** (search for Jira
+  users, weekly hours and colour per member, several teams), target hours, time format, appearance,
+  automatic refresh.
+- Views: team (KPIs, hours per member with target, hours per day/week stacked by member,
+  distribution by project, issue type and weekday, member table), member (KPIs, trend, projects, top
+  issues, worklog list by day, CSV/JSON export), issues (time per issue with the members' shares,
+  estimate and Jira total, filters, grouping by epic/project/type, worklogs per issue).
+- Local SQLite cache with day coverage per member: only missing days are loaded from Jira,
+  "Refresh" reloads the displayed range and removes deleted worklogs.
+- CI on three platforms and a release pipeline with installers for macOS, Windows and Linux.

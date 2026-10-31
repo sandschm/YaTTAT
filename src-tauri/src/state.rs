@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 use yattat_core::fetch::{FetchOutcome, FetchProgress};
+use yattat_core::i18n::{t, Lang};
 use yattat_core::jira::JiraClient;
 use yattat_core::models::*;
 use yattat_core::secrets::{EncryptedSecretStore, SecretStore};
@@ -75,12 +76,22 @@ impl AppState {
         self.settings.read().unwrap().clone()
     }
 
+    /// Language for messages sent to the user interface.
+    pub fn lang(&self) -> Lang {
+        self.settings.read().unwrap().lang()
+    }
+
+    /// A core error as a message in the configured language.
+    pub fn l(&self, e: &yattat_core::Error) -> String {
+        e.localized(self.lang())
+    }
+
     pub fn jira(&self) -> Result<Arc<JiraClient>, String> {
         self.jira
             .read()
             .unwrap()
             .clone()
-            .ok_or_else(|| "Nicht bei Jira angemeldet".to_string())
+            .ok_or_else(|| t(self.lang(), "notLoggedIn").to_string())
     }
 
     pub fn jira_opt(&self) -> Option<Arc<JiraClient>> {
@@ -138,8 +149,6 @@ impl AppState {
     }
 
     pub fn mark_auth_expired(&self) {
-        self.clear_session(Some(
-            "Die Jira-Sitzung ist abgelaufen. Bitte erneut anmelden.".into(),
-        ));
+        self.clear_session(Some(t(self.lang(), "sessionExpired").into()));
     }
 }

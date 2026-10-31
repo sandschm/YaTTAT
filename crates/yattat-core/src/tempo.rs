@@ -135,10 +135,7 @@ impl TempoCloud {
         let status = resp.status();
         if status.as_u16() == 401 || status.as_u16() == 403 {
             // Deliberately not `AuthExpired`: that would log the user out of Jira.
-            return Err(Error::Invalid(format!(
-                "Tempo-API-Token nicht akzeptiert oder keine Berechtigung (HTTP {})",
-                status.as_u16()
-            )));
+            return Err(Error::TempoAuth(status.as_u16()));
         }
         let text = resp.text().await.unwrap_or_default();
         if !status.is_success() {
@@ -154,9 +151,9 @@ impl TempoCloud {
                 })
                 .filter(|m| !m.is_empty())
                 .unwrap_or_else(|| text.chars().take(300).collect());
-            return Err(Error::Http {
+            return Err(Error::TempoHttp {
                 status: status.as_u16(),
-                message: format!("Tempo: {message}"),
+                message,
             });
         }
         if text.trim().is_empty() {
@@ -311,11 +308,11 @@ mod tests {
             .await;
         let tempo = TempoCloud::new(&server.uri(), "tok").unwrap();
         match tempo.verify(Some("me")).await {
-            Err(Error::Invalid(msg)) => assert!(msg.contains("403"), "{msg}"),
+            Err(Error::TempoAuth(403)) => {}
             other => panic!("unexpected {other:?}"),
         }
         match tempo.verify(None).await {
-            Err(Error::Http {
+            Err(Error::TempoHttp {
                 status: 400,
                 message,
             }) => assert!(message.contains("limit too large")),

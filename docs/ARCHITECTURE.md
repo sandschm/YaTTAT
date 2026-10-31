@@ -1,70 +1,74 @@
-# Architektur
+# Architecture
 
-## Überblick
+## Overview
 
 ```
-Svelte-Frontend (src/)  ── invoke/listen ──▶  Tauri-App (src-tauri/)  ──▶  yattat-core (crates/)
-   Views, Store, Mock                     Commands, Login-Webview,          Jira-Client (nur lesend), SQLite-Cache,
-                                          Abruf-Jobs, Auto-Aktualisierung   Abruf-Logik, Statistik, Export, Secrets
+Svelte frontend (src/)  ── invoke/listen ──▶  Tauri app (src-tauri/)  ──▶  yattat-core (crates/)
+   views, store, dictionary, mock         commands, login webview,        Jira client (read-only), Tempo client,
+                                          fetch jobs, automatic refresh   SQLite cache, fetch, statistics, export,
+                                                                          secrets, i18n
 ```
 
-Die gesamte Fachlogik liegt in `yattat-core` und hat keine Tauri-Abhängigkeit. Das Crate ist mit
-`cargo test` testbar (Unit-Tests, HTTP-Tests gegen `wiremock`). Die Tauri-Schicht ist dünn: sie
-hält den Zustand (`AppState`), übersetzt Commands, startet den Abruf und meldet Fortschritt und
-Ergebnisse als Events an das Frontend. YaTTAT schreibt nie nach Jira.
+All business logic lives in `yattat-core` and has no Tauri dependency. The crate is tested with
+`cargo test` (unit tests, HTTP tests against `wiremock`). The Tauri layer is thin: it holds the state
+(`AppState`), translates commands, starts fetches and reports progress and results as events to the
+frontend. YaTTAT never writes to Jira.
 
 ## yattat-core
 
-| Modul | Aufgabe |
+| Module | Purpose |
 |---|---|
-| `models` | Datenmodell (JiraUser, Project, Issue, Worklog, Member, Team, Credential, …), serde camelCase |
-| `settings` | `Settings` mit Defaults, Teams und Mitgliedern, JSON-Datei, `AppPaths`; `tidy()` räumt Teams auf und vergibt Farben |
-| `secrets` | `EncryptedSecretStore`: Master-Key im Schlüsselbund, Nutzdaten XChaCha20-Poly1305 in `secrets.enc` |
-| `jira` | `JiraClient` (Cloud/DC): Benutzer-Suche, Projekte, JQL-Suche mit Pagination, Worklogs je Ticket; `jira::parse` (JSON → Modell, ADF-Kommentare) |
-| `storage` | SQLite (`rusqlite`, WAL): Tabellen `issues`, `worklogs`, `projects`, `coverage`, `meta` |
-| `tempo` | `TempoCloud`: Tempo-API v4 mit Token, Worklogs je Benutzer (paginiert), Umwandlung ins Cache-Modell (`tempo-<id>`) |
-| `fetch` | Abruf eines Zeitraums für eine Mitgliederliste; `compare_sources` liest beide Quellen und vergleicht je Mitglied und Tag. Quelle Jira: JQL `worklogAuthor in (…) AND worklogDate …`, dann Worklogs je Ticket (4 parallel), Filter nach Autor und Tag, Zählung fremder Autoren. Quelle Tempo: Worklogs je Mitglied aus Tempo, Tickets per ID aus Jira. Danach Cache-Update inkl. Löschen verschwundener Worklogs und Coverage |
-| `stats` | Aggregation pro Team, Mitglied, Tag, Projekt, Ticket, Tickettyp und Wochentag; Soll aus Wochenmuster × Wochenstunden |
-| `export` | CSV (Semikolon, BOM für Excel) und JSON der Worklogs, optional pro Tag/Mitglied/Ticket zusammengefasst |
+| `models` | Data model (JiraUser, Project, Issue, Worklog, Member, Team, Credential, …), serde camelCase |
+| `settings` | `Settings` with defaults, teams and members, JSON file, `AppPaths`; `tidy()` cleans teams up and hands out colours |
+| `i18n` | `Language` setting (System/De/En), `Lang` resolution from the OS locale, messages the backend sends (`t`, `tf`) |
+| `error` | `Error` with English `Display` and `localized(lang)` for the user interface |
+| `secrets` | `EncryptedSecretStore`: master key in the keyring, payload XChaCha20-Poly1305 in `secrets.enc` |
+| `jira` | `JiraClient` (Cloud/DC): user search, projects, JQL search with pagination, worklogs per issue, issue by id; `jira::parse` (JSON → model, ADF comments) |
+| `tempo` | `TempoCloud`: Tempo API v4 with token, worklogs per user (paginated), conversion to the cache model (`tempo-<id>`) |
+| `storage` | SQLite (`rusqlite`, WAL): tables `issues`, `worklogs`, `projects`, `coverage`, `meta` |
+| `fetch` | Fetch of a range for a member list; `compare_sources` reads both sources and compares per member and day. Jira source: JQL `worklogAuthor in (…) AND worklogDate …`, then worklogs per issue (4 in parallel), filter by author and day, count of foreign authors. Tempo source: worklogs per member from Tempo, issues by id from Jira. Then cache update including removal of vanished worklogs, and coverage |
+| `stats` | Aggregation per team, member, day, project, issue, issue type and weekday; targets from the weekly pattern × weekly hours |
+| `export` | CSV (semicolon, BOM for Excel, headers and date format by language) and JSON of the worklogs, optionally summarised per day/member/issue |
 
-### Zeitmodell
+### Time model
 
-- Worklogs tragen in Jira `started` mit dem UTC-Offset des Autors. YaTTAT ordnet jedes Worklog dem
-  Kalendertag in dieser Zeitzone zu (`Worklog.date`). Alle Tagesstatistiken nutzen diesen Tag.
-- Die JQL-Suche wird um je einen Tag erweitert, weil Jira `worklogDate` in der Zeitzone des
-  suchenden Benutzers auswertet; die Feinfilterung passiert lokal.
-- Soll-Stunden: `hours_per_weekday` (Vollzeit-Muster) × `weekly_hours / Summe(Muster)` je Mitglied,
-  nur für Tage bis heute.
+- Worklogs carry `started` in Jira with the author's UTC offset. YaTTAT attributes every worklog to
+  the calendar day in that time zone (`Worklog.date`). All day-based statistics use this day.
+- The JQL search is widened by one day on each side because Jira evaluates `worklogDate` in the time
+  zone of the searching user; the fine filtering happens locally.
+- Target hours: `hours_per_weekday` (full-time pattern) × `weekly_hours / sum(pattern)` per member,
+  only for days up to today.
 
-### Cache und Coverage
+### Cache and coverage
 
-`coverage(author_id, date)` merkt sich, welche Tage für welchen Autor geladen wurden. Ein Abruf für
-einen Zeitraum fragt nur die fehlenden Tage ab (kleinste zusammenhängende Lücke je Autor, als ein
-JQL für alle betroffenen Autoren). „Aktualisieren“ erzwingt den Abruf des angezeigten Zeitraums;
-dabei werden Worklogs, die in Jira nicht mehr existieren, aus dem Cache entfernt. Die automatische
-Aktualisierung wiederholt den zuletzt angeforderten Zeitraum im eingestellten Intervall.
+`coverage(author_id, date)` remembers which days were loaded for which author. A fetch for a range
+only asks for the missing days (smallest contiguous gap per author, as one JQL for all affected
+authors). "Refresh" forces the fetch of the displayed range; worklogs that no longer exist in the
+source are then removed from the cache. The automatic refresh repeats the last requested range at the
+configured interval, judged by the age of the loaded days.
 
-## Tauri-Schicht
+## Tauri layer
 
-| Datei | Aufgabe |
+| File | Purpose |
 |---|---|
-| `lib.rs` | App-Aufbau, Plugins (single-instance, window-state, opener, dialog), Logging, Sitzung wiederherstellen |
-| `state.rs` | `AppState`: Store, Settings, Secrets, Client, Benutzer, `FetchStatus` |
-| `commands.rs` | Alle `#[tauri::command]`s: Settings, Login, Projekt-/Benutzersuche, Abruf, Statistik, Worklog-Listen, Export, Cache |
-| `jobs.rs` | Client installieren (inkl. Cookie-Rotation → Speicher), Tempo-Client aus dem Token laden, Sitzung wiederherstellen, Abruf mit Fortschritts-Events (Quelle laut Einstellungen), Auto-Aktualisierung |
-| `login.rs` | Browser-Login-Fenster, Cookie-Polling, Logout inkl. Löschen der Webview-Daten (wie YaTTT) |
+| `lib.rs` | App setup, plugins (single-instance, window-state, opener, dialog), logging, session restore |
+| `state.rs` | `AppState`: store, settings, secrets, clients, user, `FetchStatus`, language resolution |
+| `commands.rs` | All `#[tauri::command]`s: settings, login, project/user search, fetch, statistics, worklog lists, export, cache, comparison |
+| `jobs.rs` | Install client (including cookie rotation → store), load the Tempo client from the token, restore session, fetch with progress events (source per settings), automatic refresh, source comparison |
+| `login.rs` | Browser login window, cookie polling, logout including clearing the webview data (as in YaTTT) |
 
-### Events (Backend → Frontend)
+### Events (backend → frontend)
 
-`auth-changed`, `settings-changed`, `fetch-status` (Fortschritt und Ergebnis des Abrufs),
-`data-changed` (Cache hat sich geändert, Views laden neu), `compare-progress` (Quellen-Abgleich),
-`login-window`, `login-progress`.
+`auth-changed`, `settings-changed`, `fetch-status` (progress and result of a fetch), `data-changed`
+(cache changed, views reload), `compare-progress` (source comparison), `login-window`, `login-progress`.
 
 ## Frontend
 
-- Svelte 5 (Runes), kein Router: `store.view` schaltet zwischen Team, Mitglied, Tickets, Einstellungen.
-- `lib/store.svelte.ts`: Einstellungen, Auth, gewähltes Team, Zeitraum (Presets oder frei), Abrufstatus;
-  `ensureData()` sorgt dafür, dass der Cache den angezeigten Zeitraum abdeckt.
-- `lib/api.ts`: typisierte Wrapper um `invoke`; ohne Tauri (`npm run dev` im Browser) wird
-  `lib/mock.ts` verwendet, ein In-Memory-Backend mit zwei Teams und deterministischen Beispiel-Worklogs.
-- Diagramme sind eigene SVG-Komponenten (`BarChart`, `HBars`, `Donut`).
+- Svelte 5 (runes), no router: `store.view` switches between team, member, issues and settings.
+- `lib/i18n.svelte.ts`: dictionary (German and English), `t(key, params)` reads the language
+  reactively; `lib/format.ts` formats dates, times and decimals by language.
+- `lib/store.svelte.ts`: settings, auth, selected team, range (presets or custom), fetch status;
+  `ensureData()` makes sure the cache covers the displayed range.
+- `lib/api.ts`: typed wrappers around `invoke`; without Tauri (`npm run dev` in a browser)
+  `lib/mock.ts` is used, an in-memory backend with two teams and deterministic sample worklogs.
+- Charts are own SVG components (`BarChart`, `HBars`, `Donut`).

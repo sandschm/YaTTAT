@@ -1,19 +1,20 @@
 // Global reactive state (Svelte 5 runes). One instance shared by all views.
 import { api, isTauri, on, type AuthStatus, type CompareProgress, type FetchStatus, type Member, type Settings, type Team } from "./api";
 import { addDays, startOfDay, startOfWeek, toDateKey } from "./format";
+import { t, type Key } from "./i18n.svelte";
 
 export type View = "team" | "member" | "tickets" | "settings";
 export type Preset = "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth" | "thisQuarter" | "lastQuarter" | "thisYear" | "custom";
 
-export const presets: { id: Preset; label: string }[] = [
-  { id: "thisWeek", label: "Diese Woche" },
-  { id: "lastWeek", label: "Letzte Woche" },
-  { id: "thisMonth", label: "Dieser Monat" },
-  { id: "lastMonth", label: "Letzter Monat" },
-  { id: "thisQuarter", label: "Dieses Quartal" },
-  { id: "lastQuarter", label: "Letztes Quartal" },
-  { id: "thisYear", label: "Dieses Jahr" },
-  { id: "custom", label: "Zeitraum" },
+export const presets: { id: Preset; label: Key }[] = [
+  { id: "thisWeek", label: "range.thisWeek" },
+  { id: "lastWeek", label: "range.lastWeek" },
+  { id: "thisMonth", label: "range.thisMonth" },
+  { id: "lastMonth", label: "range.lastMonth" },
+  { id: "thisQuarter", label: "range.thisQuarter" },
+  { id: "lastQuarter", label: "range.lastQuarter" },
+  { id: "thisYear", label: "range.thisYear" },
+  { id: "custom", label: "range.custom" },
 ];
 
 export interface Toast {
@@ -147,7 +148,7 @@ class AppStore {
         const hadError = this.fetchStatus.lastError;
         const wasInProgress = this.fetchStatus.inProgress;
         this.fetchStatus = f;
-        if (f.lastError && f.lastError !== hadError) this.toast(`Abruf fehlgeschlagen: ${f.lastError}`, "error");
+        if (f.lastError && f.lastError !== hadError) this.toast(t("common.fetchFailed", { msg: f.lastError }), "error");
         // A request made while another fetch ran was dropped by the backend. Once the running
         // fetch is done, make sure the view that is displayed now is covered (no-op when it is).
         if (wasInProgress && !f.inProgress && this.ready && !f.lastError) {
@@ -165,9 +166,13 @@ class AppStore {
       on<string>("login-progress", (s) => (this.loginProgress = s)),
     ]);
     if (!isTauri) {
-      // Browser mock only: ?view=member opens a view directly (used for screenshots).
-      const requested = new URLSearchParams(location.search).get("view");
+      // Browser mock only: ?view=member opens a view directly, ?lang=en forces a language
+      // (both used for screenshots).
+      const params = new URLSearchParams(location.search);
+      const requested = params.get("view");
       if (requested === "team" || requested === "member" || requested === "tickets" || requested === "settings") this.view = requested;
+      const lang = params.get("lang");
+      if ((lang === "de" || lang === "en") && this.settings) this.settings = { ...this.settings, behavior: { ...this.settings.behavior, language: lang } };
     }
     this.ready = true;
   }
