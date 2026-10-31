@@ -36,6 +36,9 @@ YaTTAT liest nur aus Jira und schreibt nichts zurück.
   sich je Mitglied, welche Tage geladen sind, und holt nur fehlende Tage nach. „Aktualisieren“ lädt
   den angezeigten Zeitraum neu (nachträgliche Buchungen und Löschungen werden übernommen),
   optional automatisch im eingestellten Intervall.
+- **Quelle der Zeiten**: Jira-Worklogs (Standard) oder **Tempo Cloud** mit Tempo-API-Token. Bucht das
+  Team in Tempo, führt Jira die Worklogs oft unter dem Tempo-App-Konto; dann liefert nur die Tempo-API
+  die echten Autoren. YaTTAT zeigt nach dem Abruf an, wenn Jira Worklogs anderen Autoren zuordnet.
 - **Projektauswahl** (optional): Auswertung auf bestimmte Projekte beschränken.
 - Hell-/Dunkelmodus, Zeitformat Stunden:Minuten oder dezimal, Wochenbeginn Montag oder Sonntag.
 
@@ -66,6 +69,10 @@ Linux benötigt WebKitGTK 4.1.
 und zweitem Faktor.
 
 <img src="docs/screenshots/step-1-verbinden.png" width="760" alt="Einstellungen: Jira-URL und Anmeldeart">
+
+Bucht euer Team in **Tempo**? Dann unter **Quelle der Zeiten** „Tempo Cloud“ wählen und ein
+Tempo-API-Token eintragen (Tempo → Einstellungen → API-Integration). Das Token braucht in Tempo die
+Berechtigung, die Worklogs der Mitglieder zu sehen.
 
 ### 2️⃣ Team und Mitglieder anlegen
 
@@ -111,6 +118,11 @@ Projekt oder Typ; ein Klick auf die Zeile zeigt die Worklogs.
 > 🔁 **Zeiten erscheinen nicht?** Der Zeitraum wurde vielleicht schon geladen, bevor die Zeiten gebucht
 > wurden. „Aktualisieren“ holt den angezeigten Zeitraum neu; die automatische Aktualisierung
 > (Standard alle 30 Minuten) macht das von selbst.
+>
+> 🧭 **Nur einzelne Mitglieder haben Zeiten?** Meldet die Kopfzeile „Worklogs anderer Autoren gefunden“,
+> führt Jira die Zeiten unter einem anderen Konto (typisch: „Tempo Timesheets“). Dann unter
+> Einstellungen → Verbindung die Quelle **Tempo Cloud** wählen. Einstellungen → Info zeigt die Details
+> des letzten Abrufs.
 
 ## Entwicklung
 

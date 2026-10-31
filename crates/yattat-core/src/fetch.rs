@@ -1,21 +1,28 @@
-//! Loads the worklogs of team members for a date range from Jira into the local cache.
+//! Loads the worklogs of team members for a date range into the local cache.
 //!
-//! Strategy: one JQL search (`worklogAuthor in (...) AND worklogDate ...`) finds the issues that
-//! received worklogs, then every issue's worklog list is read and filtered by author and date.
+//! Two sources:
+//! * Jira: one JQL search (`worklogAuthor in (...) AND worklogDate ...`) finds the issues that
+//!   received worklogs, then every issue's worklog list is read and filtered by author and date.
+//! * Tempo Cloud: the worklogs of every member are read from the Tempo API (which knows the real
+//!   author even when the Jira worklog belongs to the Tempo app), then the referenced issues are
+//!   resolved through Jira.
+//!
 //! Days that are already cached for an author are skipped unless `force` is set; worklogs that
-//! disappeared from Jira are removed from the cache for the fetched range.
+//! disappeared from the source are removed from the cache for the fetched range.
 
 use crate::error::Result;
 use crate::jira::{jql_quote, JiraClient};
-use crate::models::Worklog;
+use crate::models::{Issue, Worklog};
 use crate::storage::Store;
+use crate::tempo::TempoCloud;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-const PARALLEL_ISSUE_REQUESTS: usize = 4;
+const PARALLEL_REQUESTS: usize = 4;
 const MAX_ISSUES: usize = 5000;
+const MAX_OTHER_AUTHORS: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -32,23 +39,61 @@ pub struct FetchRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchProgress {
-    /// "issues" while searching, "worklogs" while reading per-issue worklogs.
+    /// "issues" while searching or resolving issues, "worklogs" while reading worklogs.
     pub phase: String,
     pub done: usize,
     pub total: usize,
 }
 
+/// Worklogs in the fetched range whose author is not a requested member (Jira source). Shows
+/// e.g. that Jira attributes the team's worklogs to the Tempo app.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorCount {
+    pub id: String,
+    pub name: String,
+    pub count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchOutcome {
-    /// `false` when everything was cached already and nothing was requested from Jira.
+    /// `false` when everything was cached already and nothing was requested.
     pub fetched: bool,
+    /// "jira" or "tempoCloud"
+    pub source: String,
     pub from: NaiveDate,
     pub to: NaiveDate,
     pub authors: usize,
+    /// Requested authors that have at least one worklog in the fetched range.
+    #[serde(default)]
+    pub authors_with_worklogs: usize,
     pub issues: usize,
     pub worklogs: usize,
     pub removed: usize,
+    #[serde(default)]
+    pub other_authors: Vec<AuthorCount>,
+    /// Tempo worklogs whose issue could not be read from Jira (no permission or deleted).
+    #[serde(default)]
+    pub unresolved_issues: usize,
+}
+
+impl FetchOutcome {
+    fn nothing(req: &FetchRequest, source: &str) -> Self {
+        FetchOutcome {
+            fetched: false,
+            source: source.into(),
+            from: req.from,
+            to: req.to,
+            authors: 0,
+            authors_with_worklogs: 0,
+            issues: 0,
+            worklogs: 0,
+            removed: 0,
+            other_authors: vec![],
+            unresolved_issues: 0,
+        }
+    }
 }
 
 pub fn worklog_jql(
@@ -100,24 +145,36 @@ fn plan(store: &Store, req: &FetchRequest) -> Result<Option<(NaiveDate, NaiveDat
     Ok(lo.zip(hi).map(|(l, h)| (l, h, authors)))
 }
 
-pub async fn fetch_range(
+struct Collected {
+    issues: usize,
+    worklogs: Vec<Worklog>,
+    other_authors: Vec<AuthorCount>,
+    unresolved_issues: usize,
+}
+
+/// What one fetch covers: the (possibly narrowed) range and the authors that need it.
+struct Scope<'a> {
+    from: NaiveDate,
+    to: NaiveDate,
+    authors: &'a [String],
+    project_keys: &'a [String],
+    now: DateTime<Utc>,
+}
+
+/// Jira source: JQL for the issues, then the worklogs of every issue.
+async fn collect_from_jira(
     jira: &JiraClient,
     store: &Store,
-    req: &FetchRequest,
-    now: DateTime<Utc>,
+    scope: &Scope<'_>,
     progress: &(dyn Fn(FetchProgress) + Sync),
-) -> Result<FetchOutcome> {
-    let Some((from, to, authors)) = plan(store, req)? else {
-        return Ok(FetchOutcome {
-            fetched: false,
-            from: req.from,
-            to: req.to,
-            authors: 0,
-            issues: 0,
-            worklogs: 0,
-            removed: 0,
-        });
-    };
+) -> Result<Collected> {
+    let Scope {
+        from,
+        to,
+        authors,
+        project_keys,
+        now,
+    } = *scope;
     progress(FetchProgress {
         phase: "issues".into(),
         done: 0,
@@ -126,21 +183,14 @@ pub async fn fetch_range(
     // One day of slack on both sides: JQL evaluates worklogDate in the time zone of the searching
     // user, the cache attributes a worklog to the author's day.
     let jql = worklog_jql(
-        &authors,
+        authors,
         from - Duration::days(1),
         to + Duration::days(1),
-        &req.project_keys,
+        project_keys,
     );
     tracing::debug!("worklog jql: {jql}");
     let issues = jira.search_issues(&jql, MAX_ISSUES).await?;
-    store.upsert_issues(&issues, now)?;
-    let mut names: Vec<(String, String)> = issues
-        .iter()
-        .filter_map(|i| i.project_name.clone().map(|n| (i.project_key.clone(), n)))
-        .collect();
-    names.sort();
-    names.dedup();
-    store.upsert_project_names(&names)?;
+    remember_issues(store, &issues, now)?;
     let total = issues.len();
     progress(FetchProgress {
         phase: "worklogs".into(),
@@ -149,18 +199,27 @@ pub async fn fetch_range(
     });
     let author_set: HashSet<&str> = authors.iter().map(String::as_str).collect();
     let mut collected: Vec<Worklog> = Vec::new();
+    let mut others: HashMap<String, (String, usize)> = HashMap::new();
     let mut done = 0usize;
-    // Owned keys: a closure over `&Issue` makes the future's `Send` bound unprovable
-    // ("implementation of FnOnce is not general enough").
+    // Owned keys: a closure over `&Issue` makes the future's `Send` bound unprovable.
     let keys: Vec<String> = issues.iter().map(|i| i.key.clone()).collect();
     let mut results = stream::iter(keys)
         .map(|key: String| async move { jira.issue_worklogs(&key).await })
-        .buffer_unordered(PARALLEL_ISSUE_REQUESTS);
+        .buffer_unordered(PARALLEL_REQUESTS);
     while let Some(res) = results.next().await {
-        let logs = res?;
-        collected.extend(logs.into_iter().filter(|w| {
-            author_set.contains(w.author_id.as_str()) && w.date >= from && w.date <= to
-        }));
+        for w in res? {
+            if w.date < from || w.date > to {
+                continue;
+            }
+            if author_set.contains(w.author_id.as_str()) {
+                collected.push(w);
+            } else {
+                let entry = others
+                    .entry(w.author_id.clone())
+                    .or_insert_with(|| (w.author_name.clone().unwrap_or_default(), 0));
+                entry.1 += 1;
+            }
+        }
         done += 1;
         progress(FetchProgress {
             phase: "worklogs".into(),
@@ -168,18 +227,162 @@ pub async fn fetch_range(
             total,
         });
     }
-    store.upsert_worklogs(&collected, now)?;
-    let keep: HashSet<String> = collected.iter().map(|w| w.id.clone()).collect();
+    let mut other_authors: Vec<AuthorCount> = others
+        .into_iter()
+        .map(|(id, (name, count))| AuthorCount { id, name, count })
+        .collect();
+    other_authors.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.id.cmp(&b.id)));
+    other_authors.truncate(MAX_OTHER_AUTHORS);
+    Ok(Collected {
+        issues: total,
+        worklogs: collected,
+        other_authors,
+        unresolved_issues: 0,
+    })
+}
+
+/// Tempo source: worklogs per member from Tempo, issues resolved through Jira by id.
+async fn collect_from_tempo(
+    jira: &JiraClient,
+    tempo: &TempoCloud,
+    store: &Store,
+    scope: &Scope<'_>,
+    progress: &(dyn Fn(FetchProgress) + Sync),
+) -> Result<Collected> {
+    let Scope {
+        from,
+        to,
+        authors,
+        project_keys,
+        now,
+    } = *scope;
+    progress(FetchProgress {
+        phase: "worklogs".into(),
+        done: 0,
+        total: authors.len(),
+    });
+    let mut raw = Vec::new();
+    for (i, author) in authors.iter().enumerate() {
+        let logs = tempo.user_worklogs(author, from, to).await?;
+        raw.extend(
+            logs.into_iter()
+                .filter(|w| w.author_id == *author && w.start_date >= from && w.start_date <= to),
+        );
+        progress(FetchProgress {
+            phase: "worklogs".into(),
+            done: i + 1,
+            total: authors.len(),
+        });
+    }
+    let mut ids: Vec<i64> = raw.iter().map(|w| w.issue_id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let total = ids.len();
+    progress(FetchProgress {
+        phase: "issues".into(),
+        done: 0,
+        total,
+    });
+    let mut resolved: HashMap<i64, Issue> = HashMap::new();
+    let mut done = 0usize;
+    let mut results = stream::iter(ids)
+        .map(|id: i64| async move { jira.get_issue_opt(&id.to_string()).await.map(|i| (id, i)) })
+        .buffer_unordered(PARALLEL_REQUESTS);
+    while let Some(res) = results.next().await {
+        let (id, issue) = res?;
+        if let Some(issue) = issue {
+            resolved.insert(id, issue);
+        }
+        done += 1;
+        progress(FetchProgress {
+            phase: "issues".into(),
+            done,
+            total,
+        });
+    }
+    let issues: Vec<Issue> = resolved.values().cloned().collect();
+    remember_issues(store, &issues, now)?;
+    let allowed: HashSet<&str> = project_keys.iter().map(String::as_str).collect();
+    let mut unresolved = 0usize;
+    let mut worklogs = Vec::new();
+    for w in raw {
+        match resolved.get(&w.issue_id) {
+            Some(issue) => {
+                if allowed.is_empty() || allowed.contains(issue.project_key.as_str()) {
+                    worklogs.push(w.into_worklog(&issue.key));
+                }
+            }
+            None => unresolved += 1,
+        }
+    }
+    Ok(Collected {
+        issues: issues.len(),
+        worklogs,
+        other_authors: vec![],
+        unresolved_issues: unresolved,
+    })
+}
+
+fn remember_issues(store: &Store, issues: &[Issue], now: DateTime<Utc>) -> Result<()> {
+    store.upsert_issues(issues, now)?;
+    let mut names: Vec<(String, String)> = issues
+        .iter()
+        .filter_map(|i| i.project_name.clone().map(|n| (i.project_key.clone(), n)))
+        .collect();
+    names.sort();
+    names.dedup();
+    store.upsert_project_names(&names)
+}
+
+/// Fetches the missing part of `req` from Jira (or Tempo when a client is given) into the cache.
+pub async fn fetch_range(
+    jira: &JiraClient,
+    tempo: Option<&TempoCloud>,
+    store: &Store,
+    req: &FetchRequest,
+    now: DateTime<Utc>,
+    progress: &(dyn Fn(FetchProgress) + Sync),
+) -> Result<FetchOutcome> {
+    let source = if tempo.is_some() {
+        "tempoCloud"
+    } else {
+        "jira"
+    };
+    let Some((from, to, authors)) = plan(store, req)? else {
+        return Ok(FetchOutcome::nothing(req, source));
+    };
+    let scope = Scope {
+        from,
+        to,
+        authors: &authors,
+        project_keys: &req.project_keys,
+        now,
+    };
+    let collected = match tempo {
+        Some(t) => collect_from_tempo(jira, t, store, &scope, progress).await?,
+        None => collect_from_jira(jira, store, &scope, progress).await?,
+    };
+    store.upsert_worklogs(&collected.worklogs, now)?;
+    let keep: HashSet<String> = collected.worklogs.iter().map(|w| w.id.clone()).collect();
     let removed = store.prune_worklogs(&authors, from, to, &keep)?;
     store.mark_coverage(&authors, from, to, now)?;
+    let with_worklogs: HashSet<&str> = collected
+        .worklogs
+        .iter()
+        .map(|w| w.author_id.as_str())
+        .collect();
     Ok(FetchOutcome {
         fetched: true,
+        source: source.into(),
         from,
         to,
         authors: authors.len(),
-        issues: total,
-        worklogs: collected.len(),
+        authors_with_worklogs: with_worklogs.len(),
+        issues: collected.issues,
+        worklogs: collected.worklogs.len(),
         removed,
+        other_authors: collected.other_authors,
+        unresolved_issues: collected.unresolved_issues,
     })
 }
 
@@ -253,7 +456,8 @@ mod tests {
         let mut logs = vec![
             json!({"id": "10", "author": {"name": "alice"}, "started": "2026-10-01T09:00:00.000+0200", "timeSpentSeconds": 3600, "comment": "x"}),
             json!({"id": "12", "author": {"name": "alice"}, "started": "2026-09-30T23:30:00.000+0200", "timeSpentSeconds": 60}), // before range
-            json!({"id": "13", "author": {"name": "zed"}, "started": "2026-10-01T09:00:00.000+0200", "timeSpentSeconds": 60}), // not requested
+            json!({"id": "13", "author": {"name": "zed", "displayName": "Tempo Timesheets"}, "started": "2026-10-01T09:00:00.000+0200", "timeSpentSeconds": 60}), // not requested
+            json!({"id": "14", "author": {"name": "zed", "displayName": "Tempo Timesheets"}, "started": "2026-10-02T09:00:00.000+0200", "timeSpentSeconds": 60}),
         ];
         if include_second {
             logs.push(json!({"id": "11", "author": {"name": "alice"}, "started": "2026-10-03T09:00:00.000+0200", "timeSpentSeconds": 1800}));
@@ -281,14 +485,24 @@ mod tests {
             project_keys: vec![],
             force: false,
         };
-        let out = fetch_range(&jira, &store, &req, Utc::now(), &progress)
+        let out = fetch_range(&jira, None, &store, &req, Utc::now(), &progress)
             .await
             .unwrap();
         assert!(out.fetched);
+        assert_eq!(out.source, "jira");
         assert_eq!(out.issues, 2);
         assert_eq!(out.worklogs, 3);
         assert_eq!(out.removed, 0);
         assert_eq!(out.authors, 2);
+        assert_eq!(out.authors_with_worklogs, 2);
+        assert_eq!(
+            out.other_authors,
+            vec![AuthorCount {
+                id: "zed".into(),
+                name: "Tempo Timesheets".into(),
+                count: 2
+            }]
+        );
         {
             let p = seen.lock().unwrap();
             assert_eq!(p[0].phase, "issues");
@@ -314,7 +528,7 @@ mod tests {
 
         // Cached: a second call does not touch Jira.
         let received_before = server.received_requests().await.unwrap().len();
-        let out = fetch_range(&jira, &store, &req, Utc::now(), &progress)
+        let out = fetch_range(&jira, None, &store, &req, Utc::now(), &progress)
             .await
             .unwrap();
         assert!(!out.fetched);
@@ -328,7 +542,7 @@ mod tests {
             to: day("2026-10-07"),
             ..req.clone()
         };
-        let out = fetch_range(&jira, &store, &wider, Utc::now(), &progress)
+        let out = fetch_range(&jira, None, &store, &wider, Utc::now(), &progress)
             .await
             .unwrap();
         assert!(out.fetched);
@@ -342,7 +556,7 @@ mod tests {
             force: true,
             ..req.clone()
         };
-        let out = fetch_range(&jira, &store, &forced, Utc::now(), &progress)
+        let out = fetch_range(&jira, None, &store, &forced, Utc::now(), &progress)
             .await
             .unwrap();
         assert_eq!(out.removed, 1);
@@ -350,6 +564,99 @@ mod tests {
             .list_worklogs(day("2026-09-01"), day("2026-10-31"), &["alice".into()])
             .unwrap();
         assert_eq!(cached.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tempo_source_resolves_issues_and_filters_projects() {
+        let jira_server = MockServer::start().await;
+        let tempo_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/field"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+            .mount(&jira_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/10001"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "10001", "key": "A-1", "fields": {"summary": "One", "project": {"key": "A", "name": "Alpha"}, "issuetype": {"name": "Task"}, "status": {"name": "Open", "statusCategory": {"key": "new"}}}})))
+            .mount(&jira_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/10002"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "10002", "key": "B-7", "fields": {"summary": "Other project", "project": {"key": "B"}, "issuetype": {"name": "Task"}, "status": {"name": "Open", "statusCategory": {"key": "new"}}}})))
+            .mount(&jira_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/rest/api/2/issue/10003"))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .set_body_json(json!({"errorMessages": ["Issue does not exist"]})),
+            )
+            .mount(&jira_server)
+            .await;
+        let tlog = |id: i64, issue: i64, author: &str, date: &str| json!({"tempoWorklogId": id, "issue": {"id": issue}, "timeSpentSeconds": 3600, "startDate": date, "startTime": "09:00:00", "description": "d", "author": {"accountId": author}});
+        Mock::given(method("GET"))
+            .and(path("/worklogs/user/alice"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"metadata": {"count": 4}, "results": [
+                    tlog(1, 10001, "alice", "2026-10-01"),
+                    tlog(2, 10002, "alice", "2026-10-02"), // project B: filtered out
+                    tlog(3, 10003, "alice", "2026-10-02"), // unknown issue
+                    tlog(4, 10001, "alice", "2026-10-09") // after range
+                ]}),
+            ))
+            .mount(&tempo_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/worklogs/user/bob"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"metadata": {"count": 1}, "results": [
+                    tlog(5, 10001, "bob", "2026-10-03")
+                ]}),
+            ))
+            .mount(&tempo_server)
+            .await;
+        let jira = JiraClient::new(
+            &jira_server.uri(),
+            Credential::ApiToken {
+                email: "e".into(),
+                token: "t".into(),
+            },
+            Deployment::Cloud,
+        )
+        .unwrap();
+        let tempo = TempoCloud::new(&tempo_server.uri(), "tok").unwrap();
+        let store = Store::open_in_memory().unwrap();
+        let req = FetchRequest {
+            from: day("2026-10-01"),
+            to: day("2026-10-05"),
+            author_ids: vec!["alice".into(), "bob".into()],
+            project_keys: vec!["A".into()],
+            force: false,
+        };
+        let out = fetch_range(&jira, Some(&tempo), &store, &req, Utc::now(), &|_| {})
+            .await
+            .unwrap();
+        assert!(out.fetched);
+        assert_eq!(out.source, "tempoCloud");
+        assert_eq!(out.authors, 2);
+        assert_eq!(out.authors_with_worklogs, 2);
+        assert_eq!(out.issues, 2);
+        assert_eq!(out.worklogs, 2);
+        assert_eq!(out.unresolved_issues, 1);
+        let cached = store
+            .list_worklogs(day("2026-10-01"), day("2026-10-31"), &req.author_ids)
+            .unwrap();
+        assert_eq!(
+            cached.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(),
+            vec!["tempo-1", "tempo-5"]
+        );
+        assert_eq!(cached[0].issue_key, "A-1");
+        assert_eq!(cached[0].comment, "d");
+        assert_eq!(store.list_projects().unwrap()[0].name, "Alpha");
+        assert!(store
+            .coverage(&req.author_ids, req.from, req.to)
+            .unwrap()
+            .complete());
     }
 
     #[tokio::test]
@@ -369,7 +676,7 @@ mod tests {
             project_keys: vec![],
             force: true,
         };
-        let out = fetch_range(&jira, &store, &req, Utc::now(), &|_| {})
+        let out = fetch_range(&jira, None, &store, &req, Utc::now(), &|_| {})
             .await
             .unwrap();
         assert!(!out.fetched);

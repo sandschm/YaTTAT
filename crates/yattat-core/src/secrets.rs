@@ -257,6 +257,11 @@ pub fn credential_key(base_url: &str) -> String {
     format!("jira-credential:{}", base_url.trim_end_matches('/'))
 }
 
+/// Key of the Tempo Cloud API token for a Jira instance.
+pub fn tempo_token_key(base_url: &str) -> String {
+    format!("tempo-token:{}", base_url.trim_end_matches('/'))
+}
+
 pub fn load_credential(store: &dyn SecretStore, base_url: &str) -> Result<Option<Credential>> {
     match store.get(&credential_key(base_url))? {
         Some(raw) => Ok(Some(serde_json::from_str(&raw)?)),

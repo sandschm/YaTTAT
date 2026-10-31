@@ -6,6 +6,7 @@ export type Deployment = "unknown" | "cloud" | "dataCenter";
 export type AuthMethod = "browserSession" | "password" | "personalAccessToken" | "apiToken";
 export type TimeFormat = "hoursMinutes" | "decimal";
 export type Theme = "system" | "light" | "dark";
+export type WorklogSource = "jiraWorklogs" | "tempoCloud";
 
 export interface Member {
   /** Jira user id (Cloud: accountId, Data Center: username). */
@@ -32,6 +33,7 @@ export interface Settings {
   work: { hoursPerWeekday: number[]; firstDayOfWeek: number; timeFormat: TimeFormat; showTargets: boolean };
   refresh: { auto: boolean; intervalMinutes: number };
   behavior: { theme: Theme };
+  tempo: { source: WorklogSource; cloudApiBase: string; cloudTokenSet: boolean };
   projectColors: Record<string, string>;
 }
 
@@ -75,14 +77,28 @@ export interface FetchProgress {
   total: number;
 }
 
+export interface AuthorCount {
+  id: string;
+  name: string;
+  count: number;
+}
+
 export interface FetchOutcome {
   fetched: boolean;
+  /** "jira" or "tempoCloud" */
+  source: string;
   from: string;
   to: string;
   authors: number;
+  /** Requested members with at least one worklog in the fetched range. */
+  authorsWithWorklogs: number;
   issues: number;
   worklogs: number;
   removed: number;
+  /** Worklogs in the range by people who are not members (Jira source), e.g. the Tempo app. */
+  otherAuthors: AuthorCount[];
+  /** Tempo worklogs whose issue could not be read from Jira. */
+  unresolvedIssues: number;
 }
 
 export interface FetchStatus {
@@ -228,6 +244,8 @@ const tauriApi = {
     invoke<number>("export_worklogs", { from, to, memberIds, format, summarize, path }),
   getIssueUrl: (key: string) => invoke<string>("get_issue_url", { key }),
   clearCache: () => invoke<CacheInfo>("clear_cache"),
+  // tempo
+  setTempoCloudToken: (token: string | null) => invoke<Settings>("set_tempo_cloud_token", { token }),
   // info
   getAppInfo: () => invoke<AppInfo>("get_app_info"),
 };

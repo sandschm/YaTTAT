@@ -17,7 +17,25 @@ stehen dort unter `docs/JIRA_AUTH.md`.
 | Tickets mit Worklogs der Mitglieder im Zeitraum | `GET /rest/api/2/search/jql` (Cloud) bzw. `GET /rest/api/2/search` (DC) mit `worklogAuthor in (…) AND worklogDate >= … AND worklogDate <= …` |
 | Worklogs je Ticket | `GET /rest/api/2/issue/{key}/worklog` (paginiert) |
 
-YaTTAT schreibt nichts nach Jira. Die angemeldete Person sieht nur Worklogs von Tickets, auf die sie
+YaTTAT schreibt nichts nach Jira.
+
+## Quelle Tempo Cloud
+
+Bucht das Team in Tempo, legt Tempo die Jira-Worklogs je nach Konfiguration unter dem
+Tempo-App-Konto an. Die Jira-API meldet dann als Autor „Tempo Timesheets“ statt der Person, und
+`worklogAuthor` findet die Tickets nicht. YaTTAT zeigt das nach einem Abruf als „Worklogs anderer
+Autoren gefunden“ an. Abhilfe: Einstellungen → Verbindung → Quelle der Zeiten → **Tempo Cloud** mit
+einem Tempo-API-Token (Tempo → Einstellungen → API-Integration).
+
+| Zweck | Endpunkt |
+|---|---|
+| Token prüfen | `GET https://api.tempo.io/4/worklogs/user/{eigene accountId}?limit=1` |
+| Worklogs je Mitglied im Zeitraum | `GET https://api.tempo.io/4/worklogs/user/{accountId}?from&to&offset&limit` (paginiert) |
+| Tickets zu den Worklogs | `GET /rest/api/2/issue/{id}` je Ticket-ID (Jira-Sitzung, 4 parallel) |
+
+Das Token wird wie die Jira-Zugangsdaten verschlüsselt gespeichert und braucht in Tempo das Recht,
+die Worklogs der Mitglieder zu sehen (Team-Lead oder „View all worklogs“). Tempo-Worklogs auf Tickets,
+die die angemeldete Person in Jira nicht lesen darf, werden gezählt, aber nicht ausgewertet. Die angemeldete Person sieht nur Worklogs von Tickets, auf die sie
 in Jira Leserechte hat; Zeiten auf Tickets aus Projekten ohne Zugriff fehlen in der Auswertung.
 
 ## Benutzer-IDs

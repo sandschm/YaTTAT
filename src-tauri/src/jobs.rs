@@ -11,6 +11,8 @@ use yattat_core::fetch::{fetch_range, FetchProgress, FetchRequest};
 use yattat_core::jira::JiraClient;
 use yattat_core::models::*;
 use yattat_core::secrets;
+use yattat_core::settings::WorklogSource;
+use yattat_core::tempo::TempoCloud;
 use yattat_core::Error;
 
 pub fn emit<T: serde::Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
@@ -70,6 +72,20 @@ pub async fn install_client(
     let status = state.auth_status();
     emit(app, "auth-changed", status.clone());
     Ok(status)
+}
+
+/// (Re)builds the Tempo Cloud client from the stored token.
+pub fn load_tempo_cloud(state: &Arc<AppState>) {
+    let settings = state.settings();
+    let token = state
+        .secrets
+        .get(&secrets::tempo_token_key(&settings.jira_base()))
+        .ok()
+        .flatten();
+    let client = token
+        .and_then(|t| TempoCloud::new(&settings.tempo.cloud_api_base, &t).ok())
+        .map(Arc::new);
+    *state.tempo_cloud.write().unwrap() = client;
 }
 
 /// Try to restore a session from the secret store at startup.
@@ -141,6 +157,26 @@ pub async fn fetch_worklogs(
         });
         emit(app, "fetch-status", f.clone());
     }
+    let tempo = match settings.tempo.source {
+        WorklogSource::TempoCloud => match state.tempo_cloud() {
+            Some(t) => Some(t),
+            None => {
+                state.fetch_in_progress.store(false, Ordering::SeqCst);
+                let status = {
+                    let mut f = state.fetch.write().unwrap();
+                    f.in_progress = false;
+                    f.last_error = Some(
+                        "Tempo Cloud ist als Quelle gewählt, aber es ist kein Tempo-API-Token gespeichert (Einstellungen → Verbindung)."
+                            .into(),
+                    );
+                    f.clone()
+                };
+                emit(app, "fetch-status", status.clone());
+                return Err(status.last_error.clone().unwrap_or_default());
+            }
+        },
+        WorklogSource::JiraWorklogs => None,
+    };
     let result = match state.jira() {
         Err(e) => Err(e),
         Ok(jira) => {
@@ -162,12 +198,19 @@ pub async fn fetch_worklogs(
                     emit(&app2, "fetch-status", f.clone());
                 }
             };
-            fetch_range(&jira, &state.store, &req, Utc::now(), &progress)
-                .await
-                .map_err(|e| {
-                    handle_auth_error(app, state, &e);
-                    e.to_string()
-                })
+            fetch_range(
+                &jira,
+                tempo.as_deref(),
+                &state.store,
+                &req,
+                Utc::now(),
+                &progress,
+            )
+            .await
+            .map_err(|e| {
+                handle_auth_error(app, state, &e);
+                e.to_string()
+            })
         }
     };
     state.fetch_in_progress.store(false, Ordering::SeqCst);

@@ -10,6 +10,7 @@ use yattat_core::models::*;
 use yattat_core::secrets::{EncryptedSecretStore, SecretStore};
 use yattat_core::settings::{AppPaths, Settings};
 use yattat_core::storage::Store;
+use yattat_core::tempo::TempoCloud;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +37,7 @@ pub struct AppState {
     pub settings: RwLock<Settings>,
     pub secrets: Arc<dyn SecretStore>,
     pub jira: RwLock<Option<Arc<JiraClient>>>,
+    pub tempo_cloud: RwLock<Option<Arc<TempoCloud>>>,
     pub user: RwLock<Option<JiraUser>>,
     pub server: RwLock<Option<ServerInfo>>,
     pub auth_message: RwLock<Option<String>>,
@@ -59,6 +61,7 @@ impl AppState {
             settings: RwLock::new(settings),
             secrets,
             jira: RwLock::new(None),
+            tempo_cloud: RwLock::new(None),
             user: RwLock::new(None),
             server: RwLock::new(None),
             auth_message: RwLock::new(None),
@@ -102,6 +105,18 @@ impl AppState {
             server: self.server.read().unwrap().clone(),
             message: self.auth_message.read().unwrap().clone(),
         }
+    }
+
+    pub fn tempo_cloud(&self) -> Option<Arc<TempoCloud>> {
+        self.tempo_cloud.read().unwrap().clone()
+    }
+
+    pub fn reset_fetch_status(&self) {
+        let mut f = self.fetch.write().unwrap();
+        f.last_success = None;
+        f.last_error = None;
+        f.last_outcome = None;
+        f.last_request = None;
     }
 
     pub fn fetch_status(&self) -> FetchStatus {

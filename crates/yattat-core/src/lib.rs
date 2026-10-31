@@ -12,6 +12,7 @@ pub mod secrets;
 pub mod settings;
 pub mod stats;
 pub mod storage;
+pub mod tempo;
 
 pub use error::{Error, Result};
 pub use settings::TimeFormat;

@@ -470,6 +470,15 @@ impl JiraClient {
             .ok_or_else(|| Error::Parse(format!("Ticket {key} konnte nicht gelesen werden")))
     }
 
+    /// Issue by key or numeric id; `None` when it does not exist or is not visible.
+    pub async fn get_issue_opt(&self, key_or_id: &str) -> Result<Option<Issue>> {
+        match self.get_issue(key_or_id).await {
+            Ok(i) => Ok(Some(i)),
+            Err(Error::Http { status: 404, .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     // ------------------------------------------------------------ worklogs
 
     /// All worklogs of an issue (every author), following the pagination.

@@ -65,6 +65,7 @@ const defaultSettings: Settings = {
   work: { hoursPerWeekday: [8, 8, 8, 8, 8, 0, 0], firstDayOfWeek: 0, timeFormat: "hoursMinutes", showTargets: true },
   refresh: { auto: true, intervalMinutes: 30 },
   behavior: { theme: "system" },
+  tempo: { source: "jiraWorklogs", cloudApiBase: "https://api.tempo.io/4", cloudTokenSet: false },
   projectColors: { WEB: "#3b82f6", API: "#10b981", OPS: "#f59e0b" },
 };
 
@@ -461,7 +462,7 @@ export const mockApi = {
     if (fetchStatus.inProgress) return { ...fetchStatus };
     const info = coverageInfo(from, to, memberIds);
     if (!force && info.coveredDays >= info.totalDays) {
-      fetchStatus = { ...fetchStatus, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: false, from, to, authors: 0, issues: 0, worklogs: 0, removed: 0 } };
+      fetchStatus = { ...fetchStatus, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: false, source: settings.tempo.source === "tempoCloud" ? "tempoCloud" : "jira", from, to, authors: 0, authorsWithWorklogs: 0, issues: 0, worklogs: 0, removed: 0, otherAuthors: [], unresolvedIssues: 0 } };
       return { ...fetchStatus };
     }
     fetchStatus = { ...fetchStatus, inProgress: true, progress: { phase: "issues", done: 0, total: 0 }, lastError: null, lastRequest: { from, to, memberIds } };
@@ -479,7 +480,7 @@ export const mockApi = {
       coverage.set(id, set);
     }
     const n = visibleWorklogs(from, to, memberIds).length;
-    fetchStatus = { inProgress: false, progress: null, lastSuccess: new Date().toISOString(), lastError: null, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: true, from, to, authors: memberIds.length, issues: total, worklogs: n, removed: 0 } };
+    fetchStatus = { inProgress: false, progress: null, lastSuccess: new Date().toISOString(), lastError: null, lastRequest: { from, to, memberIds }, lastOutcome: { fetched: true, source: settings.tempo.source === "tempoCloud" ? "tempoCloud" : "jira", from, to, authors: memberIds.length, authorsWithWorklogs: new Set(visibleWorklogs(from, to, memberIds).map((w) => w.authorId)).size, issues: total, worklogs: n, removed: 0, otherAuthors: settings.tempo.source === "tempoCloud" ? [] : [{ id: "app", name: "Tempo Timesheets", count: 57 }], unresolvedIssues: 0 } };
     mockEmit("fetch-status", { ...fetchStatus });
     mockEmit("data-changed");
     return { ...fetchStatus };
@@ -496,6 +497,12 @@ export const mockApi = {
     mockEmit("fetch-status", { ...fetchStatus });
     mockEmit("data-changed");
     return cacheInfo();
+  },
+  setTempoCloudToken: async (token: string | null) => {
+    await delay(400);
+    settings.tempo.cloudTokenSet = !!token;
+    mockEmit("settings-changed", structuredClone(settings));
+    return structuredClone(settings);
   },
   getAppInfo: async (): Promise<AppInfo> => ({
     version: "0.1.0-mock",

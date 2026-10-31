@@ -13,6 +13,7 @@ use yattat_core::secrets;
 use yattat_core::settings::{AuthMethod, Settings, PALETTE};
 use yattat_core::stats::Stats;
 use yattat_core::storage::{CacheInfo, CoverageInfo};
+use yattat_core::tempo::TempoCloud;
 use yattat_core::Error;
 
 type S<'a> = State<'a, Arc<AppState>>;
@@ -55,6 +56,16 @@ pub async fn save_settings(
     if old.jira_base() != settings.jira_base() && state.is_authenticated() {
         state.clear_session(Some("Jira-URL geändert. Bitte erneut anmelden.".into()));
         emit(&app, "auth-changed", state.auth_status());
+    }
+    if old.tempo.cloud_api_base != settings.tempo.cloud_api_base {
+        jobs::load_tempo_cloud(&state);
+    }
+    // Jira and Tempo worklog ids are different id spaces: a source switch starts from an empty cache.
+    if old.tempo.source != settings.tempo.source {
+        state.store.clear().map_err(err)?;
+        state.reset_fetch_status();
+        emit(&app, "fetch-status", state.fetch_status());
+        emit(&app, "data-changed", ());
     }
     emit(&app, "settings-changed", settings.clone());
     Ok(settings)
@@ -460,6 +471,38 @@ pub fn clear_cache(app: AppHandle, state: S<'_>) -> Result<CacheInfo, String> {
     emit(&app, "fetch-status", state.fetch_status());
     emit(&app, "data-changed", ());
     state.store.cache_info().map_err(err)
+}
+
+// ---------------------------------------------------------------------- tempo
+
+/// Stores (after a check) or removes the Tempo Cloud API token.
+#[tauri::command]
+pub async fn set_tempo_cloud_token(
+    app: AppHandle,
+    state: S<'_>,
+    token: Option<String>,
+) -> Result<Settings, String> {
+    let settings = state.settings();
+    let key = secrets::tempo_token_key(&settings.jira_base());
+    match token
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+    {
+        Some(t) => {
+            let client = TempoCloud::new(&settings.tempo.cloud_api_base, &t).map_err(err)?;
+            let me = state.user().map(|u| u.id);
+            client
+                .verify(me.as_deref())
+                .await
+                .map_err(|e| format!("Tempo-Token wurde nicht akzeptiert: {e}"))?;
+            state.secrets.set(&key, &t).map_err(err)?;
+        }
+        None => state.secrets.delete(&key).map_err(err)?,
+    }
+    jobs::load_tempo_cloud(&state);
+    let mut settings = state.settings();
+    settings.tempo.cloud_token_set = state.tempo_cloud().is_some();
+    save_settings(app, state, settings).await
 }
 
 // ----------------------------------------------------------------------- info

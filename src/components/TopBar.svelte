@@ -21,6 +21,15 @@
   });
 
   const missing = $derived(coverage ? coverage.totalDays - coverage.coveredDays : 0);
+  const tempoWithoutToken = $derived(store.settings?.tempo.source === "tempoCloud" && !store.settings?.tempo.cloudTokenSet);
+  // Jira found worklogs of people who are not members (typically the Tempo app) but none or few
+  // for the members themselves: the times are probably only reachable through Tempo.
+  const outcome = $derived(store.fetchStatus.lastOutcome);
+  const otherAuthorsHint = $derived.by(() => {
+    if (!outcome || !outcome.fetched || outcome.source !== "jira" || !outcome.otherAuthors.length) return "";
+    if (outcome.authorsWithWorklogs >= outcome.authors) return "";
+    return `${outcome.authors - outcome.authorsWithWorklogs} von ${outcome.authors} Mitgliedern ohne Zeiten; Jira führt im Zeitraum Worklogs unter anderen Autoren: ${outcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ")}`;
+  });
 
   function selectPreset(p: Preset) {
     store.preset = p;
@@ -67,10 +76,14 @@
       <span class="warn"><Icon name="warning" size={13} /> Nicht verbunden</span>
     {:else if !store.memberIds.length}
       <span class="warn"><Icon name="warning" size={13} /> Keine Mitglieder im Team</span>
+    {:else if tempoWithoutToken}
+      <button type="button" class="warn link" onclick={() => (store.view = "settings")} title="Einstellungen → Verbindung → Quelle der Zeiten"><Icon name="warning" size={13} /> Tempo-API-Token fehlt</button>
     {:else if missing > 0}
       <span class="warn" title="{missing} von {coverage?.totalDays} Tagen sind noch nicht aus Jira geladen"><Icon name="warning" size={13} /> {missing} Tage fehlen</span>
     {:else if store.fetchStatus.lastError}
       <span class="warn" title={store.fetchStatus.lastError}><Icon name="warning" size={13} /> Abruf fehlgeschlagen</span>
+    {:else if otherAuthorsHint}
+      <button type="button" class="warn link" onclick={() => (store.view = "settings")} title="{otherAuthorsHint}. Werden die Zeiten in Tempo gebucht, unter Einstellungen → Verbindung die Quelle „Tempo Cloud“ wählen."><Icon name="warning" size={13} /> Worklogs anderer Autoren gefunden</button>
     {:else}
       <span class="faint" title={coverage?.newestFetch ? `Stand ${formatDate(coverage.newestFetch, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}>Stand: {relativeTime(coverage?.newestFetch ?? store.fetchStatus.lastSuccess)}</span>
     {/if}
@@ -136,6 +149,16 @@
     align-items: center;
     gap: 4px;
     color: var(--warning);
+  }
+  .warn.link {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+  }
+  .warn.link:hover {
+    text-decoration: underline;
   }
   .bar {
     width: 90px;

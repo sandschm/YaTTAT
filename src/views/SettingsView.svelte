@@ -1,7 +1,7 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte";
   import { api, type AppInfo, type AuthMethod, type JiraUser, type Member, type Project, type Settings, type Team } from "../lib/api";
-  import { formatDateTime } from "../lib/format";
+  import { formatDate, formatDateTime } from "../lib/format";
   import Icon from "../components/Icon.svelte";
   import Avatar from "../components/Avatar.svelte";
 
@@ -95,6 +95,25 @@
     await api.logout();
     store.auth = await api.getAuthStatus();
   }
+
+  // ---- tempo
+  let tempoToken = $state("");
+  let tempoBusy = $state(false);
+  async function saveTempoToken(clear = false) {
+    tempoBusy = true;
+    try {
+      await saveNow();
+      store.settings = await api.setTempoCloudToken(clear ? null : tempoToken);
+      tempoToken = "";
+      store.toast(clear ? "Tempo-Token entfernt" : "Tempo-Token geprüft und gespeichert", "success");
+    } catch (e) {
+      store.toast(String(e), "error");
+    } finally {
+      tempoBusy = false;
+    }
+  }
+  const lastOutcome = $derived(store.fetchStatus.lastOutcome);
+  const otherAuthorsTotal = $derived((lastOutcome?.otherAuthors ?? []).reduce((a, o) => a + o.count, 0));
 
   // ---- projects
   let projectQuery = $state("");
@@ -338,6 +357,33 @@
             {#if auth.message}<div class="muted">{auth.message}</div>{/if}
           {/if}
         </section>
+        <section class="card block">
+          <h3>Quelle der Zeiten</h3>
+          {#each [["jiraWorklogs", "Jira-Worklogs", "Standard. Liest die Worklogs über die Jira-API. Passt, wenn das Team direkt in Jira (oder mit YaTTT als Jira-Worklog) bucht."], ["tempoCloud", "Tempo Cloud", "Liest die Worklogs über die Tempo-API mit einem Tempo-API-Token. Nötig, wenn das Team in Tempo bucht: Jira führt diese Worklogs oft unter dem Tempo-App-Konto, sodass die Jira-API sie keiner Person zuordnet. Das Token braucht in Tempo die Berechtigung, die Worklogs der Mitglieder zu sehen (z. B. als Team-Lead)."]] as [id, label, help] (id)}
+            <label class="radio block-radio">
+              <input type="radio" name="source" value={id} bind:group={draft.tempo.source} onchange={() => change(true)} />
+              <span><strong>{label}</strong><span class="hint">{help}</span></span>
+            </label>
+          {/each}
+          <p class="hint">Beim Wechsel der Quelle wird der lokale Cache geleert und der angezeigte Zeitraum neu geladen.</p>
+          {#if draft.tempo.source === "tempoCloud"}
+            <div class="field">
+              <label for="tbase">Tempo-API-Basis</label>
+              <input id="tbase" type="url" bind:value={draft.tempo.cloudApiBase} oninput={() => change()} />
+            </div>
+            <div class="field">
+              <label for="ttoken">Tempo-API-Token {draft.tempo.cloudTokenSet ? "(gespeichert)" : ""}</label>
+              <div class="row">
+                <input id="ttoken" type="password" bind:value={tempoToken} placeholder={draft.tempo.cloudTokenSet ? "••••••••" : "Token einfügen"} onkeydown={(e) => e.key === "Enter" && tempoToken && saveTempoToken(false)} />
+                <button class="btn primary" type="button" onclick={() => saveTempoToken(false)} disabled={tempoBusy || !tempoToken}>Prüfen & speichern</button>
+                {#if draft.tempo.cloudTokenSet}<button class="btn danger" type="button" onclick={() => saveTempoToken(true)} disabled={tempoBusy}>Entfernen</button>{/if}
+              </div>
+              <span class="hint">Tempo → Einstellungen → API-Integration → neues Token. Das Token wird wie die Jira-Zugangsdaten verschlüsselt gespeichert.</span>
+            </div>
+          {:else if lastOutcome && lastOutcome.fetched && lastOutcome.source === "jira" && otherAuthorsTotal > 0 && lastOutcome.authorsWithWorklogs < lastOutcome.authors}
+            <div class="error"><Icon name="warning" size={14} /> Beim letzten Abruf hatten {lastOutcome.authors - lastOutcome.authorsWithWorklogs} von {lastOutcome.authors} Mitgliedern keine Zeiten, obwohl Jira {otherAuthorsTotal} Worklogs anderer Autoren führt ({lastOutcome.otherAuthors.map((o) => `${o.name || o.id}: ${o.count}`).join(", ")}). Bucht das Team in Tempo? Dann oben „Tempo Cloud“ wählen.</div>
+          {/if}
+        </section>
       {:else if tab === "projects"}
         <section class="card block">
           <h3>Projekte</h3>
@@ -555,6 +601,16 @@
               <dt>Abgedeckte Tage</dt><dd>{info.cache.coverageDays} (Mitglied × Tag)</dd>
               <dt>Größe</dt><dd>{formatBytes(info.cache.databaseBytes)}</dd>
               <dt>Letzter Abruf</dt><dd>{store.fetchStatus.lastSuccess ? formatDateTime(store.fetchStatus.lastSuccess) : "–"}</dd>
+              {#if lastOutcome && lastOutcome.fetched}
+                <dt>Quelle</dt><dd>{lastOutcome.source === "tempoCloud" ? "Tempo Cloud" : "Jira-Worklogs"}</dd>
+                <dt>Ergebnis</dt><dd>{lastOutcome.worklogs} Worklogs von {lastOutcome.authorsWithWorklogs} der {lastOutcome.authors} Mitglieder auf {lastOutcome.issues} Tickets ({formatDate(lastOutcome.from, { day: "2-digit", month: "2-digit", year: "numeric" })} – {formatDate(lastOutcome.to, { day: "2-digit", month: "2-digit", year: "numeric" })}){lastOutcome.removed ? `, ${lastOutcome.removed} entfernt` : ""}</dd>
+                {#if lastOutcome.otherAuthors.length}
+                  <dt>Andere Autoren</dt><dd>{lastOutcome.otherAuthors.map((o) => `${o.name || o.id} (${o.count})`).join(", ")}<span class="hint"> Worklogs im Zeitraum auf den gefundenen Tickets, die Jira nicht einem Mitglied zuordnet.</span></dd>
+                {/if}
+                {#if lastOutcome.unresolvedIssues}
+                  <dt>Nicht lesbar</dt><dd>{lastOutcome.unresolvedIssues} Tempo-Worklogs auf Tickets, die in Jira nicht lesbar sind.</dd>
+                {/if}
+              {/if}
             </dl>
           {/if}
           <div class="row" style="margin-top:10px">
@@ -633,6 +689,14 @@
     align-items: flex-start;
     padding: 3px 0;
     cursor: pointer;
+  }
+  .block-radio {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .block-radio .hint {
+    display: block;
+    margin: 2px 0 0;
   }
   .two {
     display: grid;

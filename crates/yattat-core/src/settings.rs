@@ -110,6 +110,38 @@ impl WorkSettings {
     }
 }
 
+/// Where worklogs are read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum WorklogSource {
+    /// Jira's worklog API. Works when people log time directly in Jira (or Tempo writes the Jira
+    /// worklogs under their own account).
+    #[default]
+    JiraWorklogs,
+    /// Tempo Cloud API with a Tempo API token. Needed when Jira worklogs carry the Tempo app as
+    /// author, which hides the real person from the Jira API.
+    TempoCloud,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TempoSettings {
+    pub source: WorklogSource,
+    pub cloud_api_base: String,
+    /// Set when a Tempo Cloud token is present in the secret store.
+    pub cloud_token_set: bool,
+}
+
+impl Default for TempoSettings {
+    fn default() -> Self {
+        Self {
+            source: WorklogSource::JiraWorklogs,
+            cloud_api_base: crate::tempo::DEFAULT_API_BASE.to_string(),
+            cloud_token_set: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Theme {
@@ -135,6 +167,7 @@ pub struct Settings {
     pub work: WorkSettings,
     pub refresh: RefreshSettings,
     pub behavior: BehaviorSettings,
+    pub tempo: TempoSettings,
     /// Project key -> hex color.
     pub project_colors: BTreeMap<String, String>,
 }
@@ -148,6 +181,10 @@ impl Settings {
             return Err(Error::Invalid(
                 "Aktualisierungsintervall muss mindestens 1 Minute sein".into(),
             ));
+        }
+        if self.tempo.source == WorklogSource::TempoCloud {
+            url::Url::parse(self.tempo.cloud_api_base.trim())
+                .map_err(|_| Error::Invalid("Tempo-API-Basis ist keine gültige URL".into()))?;
         }
         for t in &self.teams {
             for m in &t.members {
@@ -522,6 +559,8 @@ mod tests {
             serde_json::from_str(r#"{"jira":{"baseUrl":"https://j.example"}}"#).unwrap();
         assert_eq!(s.refresh.interval_minutes, 30);
         assert!(s.teams.is_empty());
+        assert_eq!(s.tempo.source, WorklogSource::JiraWorklogs);
+        assert_eq!(s.tempo.cloud_api_base, "https://api.tempo.io/4");
         assert_eq!(s.work.pattern_hours_per_week(), 40.0);
     }
 }

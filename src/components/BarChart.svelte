@@ -46,7 +46,7 @@
       {@const w = barWidth}
       {@const x0 = 32 + i * w}
       {@const total = b.segments.reduce((a, s) => a + s.seconds, 0)}
-      <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
       <g onclick={() => onselect?.(i)} style:cursor={onselect ? "pointer" : "default"} opacity={b.muted ? 0.45 : 1}>
         <title>{b.full}: {formatHours(total, tf)}{showTargets && b.target ? ` (Soll ${formatHours(b.target, tf)})` : ""}</title>
         <rect x={x0} y="0" width={w} height={plotH} fill="transparent" />

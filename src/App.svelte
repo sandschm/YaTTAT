@@ -32,9 +32,14 @@
     const { from, to } = store.range;
     const ids = store.memberIds;
     const connected = store.connected;
+    // the source and its token decide whether a fetch is possible at all
+    const source = store.settings?.tempo.source;
+    const tokenSet = store.settings?.tempo.cloudTokenSet;
     if (!store.ready || !connected || !ids.length) return;
     void from;
     void to;
+    void source;
+    void tokenSet;
     store.ensureData(false);
   });
 

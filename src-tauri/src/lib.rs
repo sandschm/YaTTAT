@@ -80,6 +80,7 @@ pub fn run() {
                     }
                 });
             }
+            jobs::load_tempo_cloud(&state);
             tauri::async_runtime::spawn(async move {
                 jobs::restore_session(&handle, &state).await;
             });
@@ -107,6 +108,7 @@ pub fn run() {
             commands::export_worklogs,
             commands::get_issue_url,
             commands::clear_cache,
+            commands::set_tempo_cloud_token,
             commands::get_app_info,
         ])
         .run(tauri::generate_context!())
